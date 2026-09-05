@@ -1,0 +1,959 @@
+{
+  "name": "SEO Monitor Daily + Weekly",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "weeks",
+              "triggerAtDay": [
+                1
+              ],
+              "triggerAtHour": 9
+            }
+          ]
+        }
+      },
+      "id": "5f9c2b82-6e66-4406-9c0b-aa7fa7a2b459",
+      "name": "Schedule Monday 09:00",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1,
+      "position": [
+        2000,
+        2112
+      ]
+    },
+    {
+      "parameters": {
+        "updates": [
+          "message"
+        ],
+        "additionalFields": {}
+      },
+      "id": "ef146080-0634-4ec7-ba17-9ae0ad6e8ca5",
+      "name": "Telegram Weekly Trigger",
+      "type": "n8n-nodes-base.telegramTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        2000,
+        2320
+      ],
+      "webhookId": "4af521b5-702e-4682-9c07-5b454520f92f",
+      "credentials": {
+        "telegramApi": {
+          "id": "xmrISVhnFm7SL0ru",
+          "name": "SEO-monitor"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "YOUR_GOOGLE_SHEET_ID",
+          "mode": "list",
+          "cachedResultName": "SEO_Monitor"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 387473298,
+          "mode": "list",
+          "cachedResultName": "Daily_Log"
+        },
+        "options": {}
+      },
+      "id": "6d0de322-4e14-4545-b03c-e83d4dd25a3f",
+      "name": "Read Daily_Log",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        2224,
+        2224
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "iBPNFT3LlMrFFif2",
+          "name": "Google Sheets OAuth2 API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const rows = $input.all();\nconst dailyData = {};\n\nfor (const item of rows) {\n  const r = item.json;\n  if (!r.date) continue;\n  \n  let dateStr = String(r.date).split('T')[0];\n  if(dateStr.includes('-')) {\n     const parts = dateStr.split('-');\n     if(parts.length === 3) dateStr = `${parts[2]}.${parts[1]}`;\n  }\n\n  const status = String(r.status || '').toUpperCase();\n  const errs = parseInt(r.errors_count) || 0;\n\n  if (!dailyData[dateStr]) {\n    dailyData[dateStr] = { errors: 0, isOk: true };\n  }\n  \n  dailyData[dateStr].errors += errs;\n  if (status !== 'OK' || errs > 0) {\n    dailyData[dateStr].isOk = false;\n  }\n}\n\nconst allDates = Object.keys(dailyData);\nconst last7Dates = allDates.slice(-7);\n\nlet totalErrors = 0;\nlet okDays = 0;\nlet failedDays = 0;\nconst chartDates = [];\nconst chartErrors = [];\n\nfor (const d of last7Dates) {\n  const data = dailyData[d];\n  chartDates.push(d);\n  chartErrors.push(data.errors);\n  totalErrors += data.errors;\n  \n  if (data.isOk) {\n    okDays++;\n  } else {\n    failedDays++;\n  }\n}\n\nconst totalDays = last7Dates.length || 1;\nconst uptimePercent = Math.round((okDays / totalDays) * 100);\n\nconst chartConfig = {\n  type: 'bar',\n  data: {\n    labels: chartDates,\n    datasets: [{\n      data: chartErrors,\n      backgroundColor: chartErrors.map(e => e > 0 ? '#e63946' : '#2a9d8f'),\n      borderRadius: 4,\n      minBarLength: 10\n    }]\n  },\n  options: {\n    legend: { display: false },\n    title: { display: true, text: 'Аптайм по дням', fontColor: '#ffffff', fontSize: 16 },\n    scales: {\n      yAxes: [{ ticks: { beginAtZero: true, fontColor: '#a0aabc', stepSize: 1, suggestedMax: Math.max(...chartErrors, 3) }, gridLines: { color: '#2b303b' } }],\n      xAxes: [{ ticks: { fontColor: '#a0aabc' }, gridLines: { display: false } }]\n    }\n  }\n};\n\nconst chartUrl = `https://quickchart.io/chart?c=${encodeURIComponent(JSON.stringify(chartConfig))}&bkg=${encodeURIComponent('#1b1f27')}&w=800&h=400`;\n\nreturn [{\n  json: {\n    weekly_days_checked: totalDays,\n    weekly_ok_days: okDays,\n    weekly_failed_days: failedDays,\n    weekly_uptime: `${uptimePercent}%`,\n    weekly_total_errors: totalErrors,\n    chart_url: chartUrl\n  }\n}];"
+      },
+      "id": "5637b8e4-edd1-43cd-8db9-3444d7d35c2f",
+      "name": "Calculate Uptime",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2448,
+        2224
+      ]
+    },
+    {
+      "parameters": {
+        "url": "https://api.webmaster.yandex.net/v4/user/",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "OAuth YOUR_YANDEX_WEBMASTER_TOKEN"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "0cfa7f49-88fc-4fa3-bd86-3fb47dee90e9",
+      "name": "Yandex API - Get User ID",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2672,
+        2224
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "url": "=https://api.webmaster.yandex.net/v4/user/{{ $json.user_id || 'me' }}/hosts/",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "OAuth YOUR_YANDEX_WEBMASTER_TOKEN"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "bbcfba3e-43c7-4494-bfc6-ddf42cb87d68",
+      "name": "Yandex API - Get Hosts",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2880,
+        2224
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "url": "=https://api.webmaster.yandex.net/v4/user/{{ $('Yandex API - Get User ID').first().json.user_id }}/hosts/{{ $json.hosts[0].host_id }}/summary/",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "OAuth YOUR_YANDEX_WEBMASTER_TOKEN"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "4703a88c-a4b2-4457-9793-7aba3c5b1317",
+      "name": "Yandex API - Get Host Summary",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3104,
+        2224
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "YOUR_GOOGLE_SHEET_ID",
+          "mode": "list",
+          "cachedResultName": "SEO_Monitor"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "gid=0",
+          "mode": "list",
+          "cachedResultName": "Daily_Monitor"
+        },
+        "options": {}
+      },
+      "id": "4e529ffa-eeef-46a5-b0ce-0528397204ca",
+      "name": "Read Pages for Content Audit",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        3328,
+        2224
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "mtZFJ1tKr9CHmp0i",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst targetPages = [];\n\nfor (const item of items) {\n  const row = item.json;\n  const isActive = String(row.active).toUpperCase() === 'TRUE' || row.active === true || row.active === 1;\n  const expectedStatus = String(row.expected_status || row['ожидаемый статус'] || row.status || '200').trim();\n\n  if (isActive && row.url && expectedStatus.includes('200')) {\n    targetPages.push({\n      json: {\n        url: String(row.url).trim(),\n        expected_products: parseInt(row.expected_products || row.min_products) || 0,\n        expected_names: String(row.expected_names || row.names || '').trim()\n      }\n    });\n  }\n}\n\nreturn targetPages;"
+      },
+      "id": "4e201f0f-98be-4447-854d-73919bcab370",
+      "name": "Filter Targets for Content",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3552,
+        2224
+      ]
+    },
+    {
+      "parameters": {
+        "url": "=https://functions.yandexcloud.net/YOUR_FUNCTION_ID?url={{ encodeURIComponent($json.url) }}",
+        "options": {
+          "batching": {
+            "batch": {
+              "batchSize": 1,
+              "batchInterval": 2500
+            }
+          },
+          "timeout": 120000
+        }
+      },
+      "id": "547f13c4-ecd8-4ae9-acfd-64b14714fe6b",
+      "name": "Fetch HTML via Proxy",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3760,
+        2224
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "let uptimeData = { weekly_uptime: \"—\", weekly_ok_days: 0, weekly_failed_days: 0, weekly_total_errors: 0, chart_url: \"\" };\ntry { uptimeData = $('Calculate Uptime').first()?.json || uptimeData; } catch(e) {}\n\nlet pagesFilter = [];\ntry { pagesFilter = $('Filter Targets for Content').all() || []; } catch(e) {}\n\nconst htmls = $input.all();\nconst weekDate = new Date().toISOString().split('T')[0];\n\nlet pagesInSearch = \"—\", sqi = \"—\", wmErrorsCount = 0, wmStatusText = \"В НОРМЕ\";\ntry {\n  const summaryNode = $('Yandex API - Get Host Summary').first();\n  if (summaryNode && summaryNode.json) {\n    const data = summaryNode.json;\n    pagesInSearch = data.searchable_pages_count !== undefined ? data.searchable_pages_count : \"—\";\n    sqi = data.sqi || \"—\";\n    if (data.site_problems) {\n      const fatal = data.site_problems.FATAL || 0;\n      const critical = data.site_problems.CRITICAL || 0;\n      wmErrorsCount = fatal + critical;\n      if (wmErrorsCount > 0) wmStatusText = `⚠️ Ошибок: ${wmErrorsCount} (Фатальных: ${fatal}, Критических: ${critical})`;\n    }\n  }\n} catch (e) {}\n\nfunction extractSeoBlock(html) {\n  if (!html) return '';\n  const articleMatch = html.match(/<article[\\s\\S]*?<\\/article>/i);\n  if (articleMatch) return articleMatch[0];\n  const staticMatch = html.match(/<div[^>]*class=[\"'][^\"']*static-text[^\"']*[\"'][^>]*>([\\s\\S]*?)<\\/div>/i);\n  if (staticMatch) return staticMatch[0];\n  const widgetMatch = html.match(/class=[\"'][^\"']*widget-type_system_widget_v4_collection_description[\\s\\S]*?<\\/div>\\s*<\\/div>/i);\n  if (widgetMatch) return widgetMatch[0];\n  return '';\n}\n\nlet errorLogs = [];\nlet successLogs = [];\nlet totalWarnings = 0;\nlet shortErrorsForTg = [];\n\nfor (let i = 0; i < htmls.length; i++) {\n  const pageData = pagesFilter[i] ? pagesFilter[i].json : {};\n  const origUrl = pageData.url || `Страница #${i+1}`;\n  const shortUrl = origUrl.replace('https://boosterpro.ru', '');\n  const expectedProducts = parseInt(pageData.expected_products) || 0;\n  const expectedNamesStr = pageData.expected_names || \"\";\n  \n  const rawHtml = htmls[i] && htmls[i].json ? (htmls[i].json.html_snippet || \"\") : \"\";\n  \n  if (!rawHtml) {\n    let errorReason = \"Нет данных от узла (таймаут сети или пустой ответ)\";\n    if (htmls[i] && htmls[i].json) {\n      errorReason = htmls[i].json.message || htmls[i].json.error || htmls[i].json.statusCode || JSON.stringify(htmls[i].json).substring(0, 150);\n    }\n    errorLogs.push(`### ❌ ${shortUrl}\\n- **Лог ответа сервера:** ${errorReason}`);\n    shortErrorsForTg.push(`❌ ${shortUrl} (Ошибка ответа)`);\n    totalWarnings++;\n    continue;\n  }\n\n  let pageIssues = [];\n  let productCount = 0;\n  let cleanHtml = rawHtml;\n  \n  // 1. ИЗОЛЯЦИЯ КАТАЛОГА\n  const cutoffRegex = /(widget-type_widget_v4_article_previews|widget-type_widget_v4_special_products_tabs|<footer[^>]*>|class=[\"'][^\"']*site-footer[\"'])/i;\n  const cutoffMatch = rawHtml.match(cutoffRegex);\n  if (cutoffMatch && cutoffMatch.index > 5000) { \n    cleanHtml = rawHtml.substring(0, cutoffMatch.index);\n  }\n\n  // 2. СЧИТАЕМ ТОВАРЫ ПО УНИКАЛЬНОМУ КЛАССУ\n  const productTitles = cleanHtml.match(/class=[\"'][^\"']*product-preview__title[^\"']*[\"']/gi);\n  productCount = productTitles ? productTitles.length : 0;\n\n  // 3. ПРОВЕРКА ОБЩЕГО КОЛИЧЕСТВА\n  if (expectedProducts > 0 && productCount !== expectedProducts) {\n    const diff = Math.abs(expectedProducts - productCount);\n    pageIssues.push(`⚠️ **Ассортимент:** Найдено **${productCount}** шт. (Должно быть ровно: ${expectedProducts}, разница: ${diff} шт.)`);\n  } else if (productCount === 0 && shortUrl.includes('/collection/')) {\n    pageIssues.push(`⚠️ **Ассортимент:** Категория пустая (0 товаров)!`);\n  }\n\n  // 4. ПРОВЕРКА НАЛИЧИЯ КОНКРЕТНЫХ ТОВАРОВ\n  if (expectedNamesStr) {\n    const expectedArray = expectedNamesStr.split(',').map(s => s.trim()).filter(s => s);\n    let missingItems = [];\n    for (const itemName of expectedArray) {\n      if (!cleanHtml.toLowerCase().includes(itemName.toLowerCase())) {\n        missingItems.push(itemName);\n      }\n    }\n    if (missingItems.length > 0) {\n      pageIssues.push(`❌ **Отсутствуют важные товары:** ${missingItems.join(', ')}`);\n    }\n  }\n\n  // 5. ПРОВЕРКА МИКРОРАЗМЕТКИ (С ВЫТАСКИВАНИЕМ РАСПРОДАННЫХ ТОВАРОВ)\n  const jsonLdMatches = rawHtml.match(/<script[^>]+type=[\"']application\\/ld\\+json[\"'][^>]*>([\\s\\S]*?)<\\/script>/gi);\n  let outOfStockItems = [];\n  \n  if (!jsonLdMatches || jsonLdMatches.length === 0) {\n    pageIssues.push(`❌ **Микроразметка:** Блок JSON-LD не найден`);\n  } else {\n    let validSchemas = [];\n    let hasJsonError = false;\n    \n    for (const scriptTag of jsonLdMatches) {\n      const contentMatch = scriptTag.match(/<script[^>]*>([\\s\\S]*?)<\\/script>/i);\n      if (contentMatch && contentMatch[1]) {\n        try {\n          const parsed = JSON.parse(contentMatch[1].trim());\n          \n          if (parsed['@type'] === 'ItemList' && parsed.itemListElement) {\n             for (const item of parsed.itemListElement) {\n                 if (item.item && item.item.offers && item.item.offers.availability) {\n                     if (item.item.offers.availability.includes('OutOfStock')) {\n                         outOfStockItems.push(item.item.name || \"Неизвестный товар\");\n                     }\n                 }\n             }\n          }\n          \n          const checkType = (obj) => {\n              if (Array.isArray(obj)) return obj.map(o => o['@type']).join(',');\n              if (obj['@graph'] && Array.isArray(obj['@graph'])) return obj['@graph'].map(o => o['@type']).join(',');\n              return obj['@type'] || 'Неизвестно';\n          };\n          validSchemas.push(checkType(parsed));\n        } catch (e) {\n          hasJsonError = true;\n        }\n      }\n    }\n    if (hasJsonError) {\n      pageIssues.push(`❌ **Микроразметка:** Ошибка синтаксиса JSON (битый код)`);\n    } else {\n      const schemaString = validSchemas.join(', ');\n      \n      let requiredSchemas = ['BreadcrumbList'];\n      if (shortUrl.includes('/collection/')) {\n        requiredSchemas.push('ItemList', 'FAQPage');\n      } else if (shortUrl.includes('/blogs/')) {\n        requiredSchemas.push('ItemList', 'FAQPage', 'Article');\n      } else if (shortUrl.includes('/product/')) {\n        requiredSchemas.push('Product', 'FAQPage');\n      }\n\n      let missingSchemas = [];\n      for (const reqSchema of requiredSchemas) {\n        if (!schemaString.includes(reqSchema)) {\n          missingSchemas.push(reqSchema);\n        }\n      }\n      \n      if (missingSchemas.length > 0) {\n        pageIssues.push(`⚠️ **Микроразметка:** Отсутствуют блоки: ${missingSchemas.join(', ')}`);\n      }\n    }\n  }\n  \n  if (outOfStockItems.length > 0) {\n     const uniqueOutOfStock = [...new Set(outOfStockItems)];\n     pageIssues.push(`⚠️ **Наличие:** Распроданы: ${uniqueOutOfStock.join(', ')}`);\n  }\n\n  // 6. Проверка картинок\n  const seoHtml = extractSeoBlock(rawHtml);\n  if (seoHtml) {\n    const imgMatches = seoHtml.match(/<img[^>]+>/g) || [];\n    let missingAltCount = 0;\n    for (const img of imgMatches) {\n      if (img.includes('mc.yandex.ru') || img.includes('served_assets') || img.includes('favicon') || img.includes('data:image')) continue;\n      const altMatch = img.match(/alt=[\"']([^\"']*)[\"']/i);\n      if (!altMatch || !altMatch[1].trim()) missingAltCount++;\n    }\n    if (missingAltCount > 0) {\n      pageIssues.push(`⚠️ **Картинки:** Без тега ALT в тексте (${missingAltCount} шт.)`);\n    }\n  }\n\n  if (pageIssues.length > 0) {\n    totalWarnings++;\n    errorLogs.push(`### ⚠️ ${shortUrl} (Товаров: ${productCount})\\n` + pageIssues.map(item => `- ${item}`).join('\\n'));\n    shortErrorsForTg.push(`⚠️ ${shortUrl}`);\n  } else {\n    successLogs.push(`- ✅ **${shortUrl}** (Товаров: ${productCount} шт. | Разметка: В норме)`);\n  }\n}\n\nlet mdDetails = `# Еженедельный SEO-Отчет (boosterpro.ru)\\n**Дата отчета:** ${weekDate}\\n\\n`;\nmdDetails += `## 1. Сводка Яндекс.Вебмастера\\n- **Страниц в поиске Яндекса:** ${pagesInSearch}\\n- **ИКС сайта:** ${sqi}\\n- **Статус проблем:** ${wmStatusText}\\n\\n`;\nmdDetails += `## 2. Стабильность за 7 дней\\n- **Uptime:** ${uptimeData.weekly_uptime}\\n- **Сбоев за неделю:** ${uptimeData.weekly_total_errors}\\n\\n`;\nmdDetails += `## 3. Выявленные отклонения\\n\\n`;\n\nif (errorLogs.length === 0) {\n  mdDetails += `✅ **Проблем не обнаружено. Все проверенные категории в норме.**\\n\\n`;\n} else {\n  mdDetails += errorLogs.join('\\n\\n') + '\\n\\n';\n}\n\nmdDetails += `## 4. Успешно проверенные страницы (${successLogs.length} шт.)\\n\\n`;\nmdDetails += successLogs.join('\\n');\n\nconst overallStatus = (totalWarnings > 0 || wmErrorsCount > 0) ? \"WARNING\" : \"OK\";\n\nlet tgSummary = `📈 <b>ЕЖЕНЕДЕЛЬНЫЙ SEO-ОТЧЕТ (${weekDate})</b>\\n\\n`;\ntgSummary += `• <b>Uptime:</b> ${uptimeData.weekly_uptime}\\n`;\ntgSummary += `• <b>Индекс Яндекса:</b> ${pagesInSearch} стр. | ИКС: ${sqi}\\n`;\n\nif (totalWarnings > 0 || wmErrorsCount > 0) {\n  tgSummary += `\\n⚠️ <b>Найдены замечания (${totalWarnings} кат.):</b>\\n`;\n  tgSummary += shortErrorsForTg.slice(0, 10).join('\\n');\n  if (shortErrorsForTg.length > 10) tgSummary += `\\n... и еще ${shortErrorsForTg.length - 10}`;\n  tgSummary += `\\n\\nФайл с полным логом прикреплен ниже.`;\n} else {\n  tgSummary += `\\n✅ <b>Сайт работает идеально. Проверено ${successLogs.length} категорий.</b>`;\n}\n\n// Формируем чистый текст для колонки weekly_summary в Google Sheets\nlet tableSummary = \"\";\nif (totalWarnings > 0 || wmErrorsCount > 0) {\n  let issues = [];\n  if (wmErrorsCount > 0) issues.push(`Я.Вебмастер: ${wmErrorsCount} ошибок`);\n  if (shortErrorsForTg.length > 0) {\n    issues.push(\"Проблемы в: \" + shortErrorsForTg.map(s => s.replace('⚠️ ', '').replace('❌ ', '')).join(', '));\n  }\n  tableSummary = issues.join(' | ');\n} else {\n  tableSummary = \"✅ Замечаний нет\";\n}\n\nreturn [{\n  json: { \n    week_date: weekDate, \n    status: overallStatus, \n    telegram_summary: tgSummary,\n    table_summary: tableSummary,\n    daily_uptime: uptimeData.weekly_uptime,\n    webmaster_pages_in_search: pagesInSearch,\n    webmaster_errors: wmErrorsCount,\n    content_warnings: totalWarnings,\n    chart_url: uptimeData.chart_url,\n    markdown_text: mdDetails\n  }\n}];"
+      },
+      "id": "9ff166a9-2fe5-42f5-9ec3-360ba968de62",
+      "name": "Process & Aggregate Weekly",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3984,
+        2224
+      ]
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.chart_url }}",
+        "options": {}
+      },
+      "id": "1c906b3e-733a-493a-82e8-9c85801ddf2c",
+      "name": "Download Chart Image",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        4192,
+        2224
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "sendPhoto",
+        "chatId": "-1003946518485",
+        "binaryData": true,
+        "additionalFields": {
+          "caption": "={{ $('Process & Aggregate Weekly').first().json.telegram_summary }}",
+          "parse_mode": "HTML"
+        }
+      },
+      "id": "733046e4-a6a6-42a2-8e11-c21903216597",
+      "name": "Telegram Send Chart",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1,
+      "position": [
+        4400,
+        2224
+      ],
+      "webhookId": "2e93e918-ea4e-431c-9e15-4e112e444608",
+      "credentials": {
+        "telegramApi": {
+          "id": "xmrISVhnFm7SL0ru",
+          "name": "SEO-monitor"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const sourceData = $('Process & Aggregate Weekly').first().json;\n\nconst mdText = sourceData.markdown_text || \"Ошибка: не удалось прочитать текст отчета из предыдущей ноды.\";\nconst weekDate = sourceData.week_date || new Date().toISOString().split('T')[0];\n\nreturn [{\n  json: {\n    week_date: weekDate,\n    status: sourceData.status || \"OK\",\n    table_summary: sourceData.table_summary || \"\",\n    daily_uptime: sourceData.daily_uptime || \"\",\n    webmaster_pages_in_search: sourceData.webmaster_pages_in_search || \"\",\n    webmaster_errors: sourceData.webmaster_errors || 0,\n    content_warnings: sourceData.content_warnings || 0\n  },\n  binary: {\n    markdown_file: {\n      data: Buffer.from(mdText, 'utf-8').toString('base64'),\n      mimeType: 'text/markdown',\n      fileName: `Weekly_SEO_Report_${weekDate}.md`\n    }\n  }\n}];"
+      },
+      "id": "096f13c6-4f39-4125-a25f-36be5a19c07b",
+      "name": "Create Markdown File",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4624,
+        2224
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "sendDocument",
+        "chatId": "-1003946518485",
+        "binaryData": true,
+        "binaryPropertyName": "markdown_file",
+        "additionalFields": {
+          "caption": "📄 Детальный лог проверок",
+          "parse_mode": "HTML"
+        }
+      },
+      "id": "c3412d00-f2c1-4a1b-a9d8-dca960794f16",
+      "name": "Telegram Send Report File",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1,
+      "position": [
+        4832,
+        2224
+      ],
+      "webhookId": "14f7edf4-dc3a-45cf-bca8-de438ead5590",
+      "credentials": {
+        "telegramApi": {
+          "id": "xmrISVhnFm7SL0ru",
+          "name": "SEO-monitor"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "YOUR_GOOGLE_SHEET_ID",
+          "mode": "list",
+          "cachedResultName": "SEO_Monitor"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 2095192049,
+          "mode": "list",
+          "cachedResultName": "Weekly_Log"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "week_date": "={{ $json.week_date }}",
+            "status": "={{ $json.status }}",
+            "daily_uptime": "={{ $json.daily_uptime }}",
+            "webmaster_pages_in_search": "={{ $json.webmaster_pages_in_search }}",
+            "webmaster_errors": "={{ $json.webmaster_errors }}",
+            "content_warnings": "={{ $json.content_warnings }}",
+            "weekly_summary": "={{ $json.table_summary }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "week_date",
+              "displayName": "week_date",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "status",
+              "displayName": "status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "daily_uptime",
+              "displayName": "daily_uptime",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "webmaster_pages_in_search",
+              "displayName": "webmaster_pages_in_search",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "webmaster_errors",
+              "displayName": "webmaster_errors",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "content_warnings",
+              "displayName": "content_warnings",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "weekly_summary",
+              "displayName": "weekly_summary",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "de20e76f-97a3-465e-9ed4-2df738db8667",
+      "name": "Append to Weekly_Log Sheet",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        4624,
+        2048
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "iBPNFT3LlMrFFif2",
+          "name": "Google Sheets OAuth2 API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const originals = $('Prepare Active Items').all();\nconst responses = $input.all();\n\n// Определение инициатора запуска\nlet initiator = \"Ежедневный анализ\";\ntry {\n  const tgData = $(\"Telegram Trigger1\").first();\n  if (tgData && tgData.json) {\n    const user = tgData.json.message?.from?.username || tgData.json.message?.from?.first_name;\n    initiator = user ? `По вызову в ТГ (@${user})` : \"По вызову в ТГ\";\n  }\n} catch (e) {\n  initiator = \"Ежедневный анализ\";\n}\n\nlet errorCount = 0;\nlet logErrorDetails = [];\nconst dateStr = new Date().toISOString().split('T')[0];\n\nlet mdDetails = `# Ежедневный SEO-Отчет (boosterpro.ru)\\n**Инициатор:** ${initiator}\\n**Дата:** ${dateStr}\\n\\n## Детализация по страницам\\n\\n`;\n\nfunction cleanText(str) {\n  if (!str) return '';\n  return str.replace(/<[^>]+>/g, '').replace(/\\s+/g, ' ').trim();\n}\n\nfunction extractTag(html, regex) {\n  const match = html.match(regex);\n  return match ? cleanText(match[1]) : '';\n}\n\nfunction extractMeta(html, name) {\n  const regex1 = new RegExp(`<meta[^>]*name=[\"']${name}[\"'][^>]*content=[\"']([^\"']*)[\"']`, 'i');\n  const regex2 = new RegExp(`<meta[^>]*content=[\"']([^\"']*)[\"'][^>]*name=[\"']${name}[\"']`, 'i');\n  const match = html.match(regex1) || html.match(regex2);\n  return match ? cleanText(match[1]) : '';\n}\n\nfor (let i = 0; i < originals.length; i++) {\n  const orig = originals[i].json;\n  const res = responses[i] ? responses[i].json : null;\n  \n  let status = \"ERR\";\n  let rawHtml = \"\";\n  let location = \"\";\n  let errDetail = \"\";\n\n  if (res && res.http_status) {\n    status = res.http_status;\n    rawHtml = res.html_snippet || \"\";\n    location = res.location || \"\";\n    errDetail = res.error || \"\";\n  }\n\n  let icon = \"✅\";\n  let notes = [];\n  let shortUrl = orig.url.replace('https://boosterpro.ru', '');\n\n  if (status === \"ERR\") {\n    icon = \"❌\";\n    const errText = errDetail ? `[Сбой: ${errDetail.slice(0, 30)}]` : \"[Сбой сети/таймаут]\";\n    notes.push(errText);\n    errorCount++;\n  } else {\n    // 1. Проверка HTTP Status\n    if (status !== orig.expected_status) {\n      icon = \"❌\";\n      notes.push(`[Статус: ${status}, ждали: ${orig.expected_status}]`);\n      errorCount++;\n    }\n\n    // 2. Проверки для Target страниц\n    if (orig.type === 'target') {\n      const robots = extractMeta(rawHtml, 'robots').toLowerCase();\n      const googlebot = extractMeta(rawHtml, 'googlebot').toLowerCase();\n      \n      if (robots.includes('noindex') || googlebot.includes('noindex')) {\n        icon = \"❌\";\n        notes.push(\"[noindex!]\");\n        errorCount++;\n      }\n\n      // H1 Check\n      if (orig.expected_h1) {\n        const actualH1 = extractTag(rawHtml, /<h1[^>]*>([\\s\\S]*?)<\\/h1>/i);\n        if (!actualH1) {\n          icon = \"❌\"; notes.push(\"[H1 отсутствует]\"); errorCount++;\n        } else if (!actualH1.toLowerCase().includes(orig.expected_h1.toLowerCase())) {\n          icon = \"⚠️\"; notes.push(`[H1 расходится]`); errorCount++;\n        }\n      }\n\n      // Title Check\n      if (orig.expected_title) {\n        const actualTitle = extractTag(rawHtml, /<title[^>]*>([\\s\\S]*?)<\\/title>/i);\n        if (!actualTitle) {\n          icon = \"❌\"; notes.push(\"[Title отсутствует]\"); errorCount++;\n        } else if (!actualTitle.toLowerCase().includes(orig.expected_title.toLowerCase())) {\n          icon = \"⚠️\"; notes.push(`[Title расходится]`); errorCount++;\n        }\n      }\n\n      // Description Check\n      if (orig.expected_desc) {\n        const actualDesc = extractMeta(rawHtml, 'description');\n        if (!actualDesc) {\n          icon = \"❌\"; notes.push(\"[Desc отсутствует]\"); errorCount++;\n        } else if (!actualDesc.toLowerCase().includes(orig.expected_desc.toLowerCase())) {\n          icon = \"⚠️\"; notes.push(`[Desc расходится]`); errorCount++;\n        }\n      }\n    }\n\n    // 3. Проверки для Redirect страниц\n    if (orig.type === 'redirect') {\n      const locClean = location.replace('https://boosterpro.ru', '');\n      const expClean = orig.expected_target.replace('https://boosterpro.ru', '');\n      \n      if (orig.expected_target && locClean !== expClean) {\n        icon = \"❌\";\n        notes.push(`[Кривой редирект на: ${locClean || 'неизвестно'}]`);\n        errorCount++;\n      }\n    }\n  }\n\n  if (notes.length > 0) {\n    logErrorDetails.push(`${icon} ${shortUrl} ${notes.join(' ')}`);\n  }\n\n  const noteStr = notes.length > 0 ? ` ${notes.join(' ')}` : '';\n  mdDetails += `- ${icon} **${status}** | ${shortUrl}${noteStr}\\n`;\n}\n\nmdDetails += `\\n**Всего ошибок/предупреждений:** ${errorCount}`;\n\nlet tgSummary = `📊 <b>SEO-Мониторинг (${initiator}):</b>\\n\\n`;\ntgSummary += `Проверено страниц: ${originals.length}\\n`;\n\nif (errorCount > 0) {\n  tgSummary += `⚠️ <b>Найдены замечания: ${errorCount}</b>\\n`;\n  tgSummary += `Подробный лог прикреплен в файле ниже.`;\n} else {\n  tgSummary += `✅ <b>Все страницы в норме. Ошибок нет.</b>\\n`;\n  tgSummary += `Детальный лог в прикрепленном файле.`;\n}\n\nreturn [{\n  json: {\n    telegram_text: tgSummary,\n    markdown_text: mdDetails,\n    log_date: dateStr,\n    log_status: errorCount === 0 ? \"OK\" : \"ERROR\",\n    log_total: originals.length,\n    log_errors: errorCount,\n    log_details: logErrorDetails.length > 0 ? logErrorDetails.join('\\n') : \"—\",\n    log_initiator: initiator\n  }\n}];"
+      },
+      "id": "695c96bb-d183-4440-a5f9-39450a9c3c38",
+      "name": "Process & Aggregate Daily",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2864,
+        1792
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const sourceData = $('Process & Aggregate Daily').first().json;\nconst mdText = sourceData.markdown_text || \"Ошибка создания отчета.\";\nconst dateStr = sourceData.log_date || new Date().toISOString().split('T')[0];\n\nreturn [{\n  json: sourceData,\n  binary: {\n    data: {\n      data: Buffer.from(mdText, 'utf-8').toString('base64'),\n      mimeType: 'text/markdown',\n      fileName: `Daily_SEO_Report_${dateStr}.md`\n    }\n  }\n}];"
+      },
+      "id": "112c0b78-85b0-495f-942a-4343b589c245",
+      "name": "Create Markdown File Daily",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3088,
+        1792
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "sendDocument",
+        "chatId": "-1003946518485",
+        "binaryData": true,
+        "additionalFields": {
+          "caption": "={{ $json.telegram_text }}",
+          "parse_mode": "HTML"
+        }
+      },
+      "id": "ad83b1fc-7a93-4518-a9c8-bdffdaab2b56",
+      "name": "Telegram Alert Daily",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1,
+      "position": [
+        3312,
+        1696
+      ],
+      "webhookId": "7bd20f13-dfdd-453d-ab19-fdc0805f05e6",
+      "credentials": {
+        "telegramApi": {
+          "id": "xmrISVhnFm7SL0ru",
+          "name": "SEO-monitor"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "YOUR_GOOGLE_SHEET_ID",
+          "mode": "list",
+          "cachedResultName": "SEO_Monitor"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 387473298,
+          "mode": "list",
+          "cachedResultName": "Daily_Log"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "date": "={{ $json.log_date }}",
+            "status": "={{ $json.log_status }}",
+            "total_checked": "={{ $json.log_total }}",
+            "errors_count": "={{ $json.log_errors }}",
+            "error_details": "={{ $json.log_details }}",
+            "Initiator": "={{ $json.log_initiator }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "date",
+              "displayName": "date",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "status",
+              "displayName": "status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "total_checked",
+              "displayName": "total_checked",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "errors_count",
+              "displayName": "errors_count",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "error_details",
+              "displayName": "error_details",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Initiator",
+              "displayName": "Initiator",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "4e4d8913-78a7-4b06-a376-c1e9b4d15526",
+      "name": "Append to Log Sheet Daily",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        3312,
+        1888
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "iBPNFT3LlMrFFif2",
+          "name": "Google Sheets OAuth2 API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "updates": [
+          "message"
+        ],
+        "additionalFields": {}
+      },
+      "id": "3a3aafde-bfde-44e5-ade0-1a194e7c5224",
+      "name": "Telegram Trigger1",
+      "type": "n8n-nodes-base.telegramTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        2000,
+        1888
+      ],
+      "webhookId": "59a77a1a-6234-418f-850d-c06ae3c47989",
+      "credentials": {
+        "telegramApi": {
+          "id": "xmrISVhnFm7SL0ru",
+          "name": "SEO-monitor"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "triggerAtHour": 7
+            }
+          ]
+        }
+      },
+      "id": "c99abbfe-0e5c-4c15-8420-218dcd1675c9",
+      "name": "Schedule Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1,
+      "position": [
+        2000,
+        1696
+      ]
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "YOUR_GOOGLE_SHEET_ID",
+          "mode": "list",
+          "cachedResultName": "SEO_Monitor"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "gid=0",
+          "mode": "list",
+          "cachedResultName": "Daily_Monitor"
+        },
+        "options": {}
+      },
+      "id": "aeee8c88-a611-4cd5-9eab-4e905405ce1f",
+      "name": "Read Pages Sheet",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        2208,
+        1792
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "mtZFJ1tKr9CHmp0i",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst activeItems = [];\n\nfor (const item of items) {\n  const row = item.json;\n  // Пропускаем неактивные строки\n  const isActive = String(row.active).toUpperCase() === 'TRUE' || row.active === true || row.active === 1;\n  if (isActive && row.url) {\n    activeItems.push({\n      json: {\n        url: String(row.url).trim(),\n        type: String(row.type || 'target').trim().toLowerCase(),\n        expected_status: parseInt(row.expected_status) || 200,\n        expected_target: String(row.expected_target || '').trim(),\n        expected_h1: String(row.expected_h1 || '').trim(),\n        expected_title: String(row.expected_title || '').trim(),\n        expected_desc: String(row.expected_desc || '').trim()\n      }\n    });\n  }\n}\n\nreturn activeItems;"
+      },
+      "id": "42406a18-cb6b-4465-bb45-516958426ed7",
+      "name": "Prepare Active Items",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2432,
+        1792
+      ]
+    },
+    {
+      "parameters": {
+        "url": "=https://functions.yandexcloud.net/YOUR_FUNCTION_ID?url={{ encodeURIComponent($json.url) }}",
+        "options": {
+          "batching": {
+            "batch": {
+              "batchSize": 1,
+              "batchInterval": 2500
+            }
+          },
+          "timeout": 120000
+        }
+      },
+      "id": "0aca97a2-07ba-4096-a2ed-2ec86c8bf579",
+      "name": "HTTP Yandex Proxy",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2656,
+        1792
+      ],
+      "onError": "continueRegularOutput"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Schedule Monday 09:00": {
+      "main": [
+        [
+          {
+            "node": "Read Daily_Log",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Telegram Weekly Trigger": {
+      "main": [
+        [
+          {
+            "node": "Read Daily_Log",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Daily_Log": {
+      "main": [
+        [
+          {
+            "node": "Calculate Uptime",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Calculate Uptime": {
+      "main": [
+        [
+          {
+            "node": "Yandex API - Get User ID",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Yandex API - Get User ID": {
+      "main": [
+        [
+          {
+            "node": "Yandex API - Get Hosts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Yandex API - Get Hosts": {
+      "main": [
+        [
+          {
+            "node": "Yandex API - Get Host Summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Yandex API - Get Host Summary": {
+      "main": [
+        [
+          {
+            "node": "Read Pages for Content Audit",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Pages for Content Audit": {
+      "main": [
+        [
+          {
+            "node": "Filter Targets for Content",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filter Targets for Content": {
+      "main": [
+        [
+          {
+            "node": "Fetch HTML via Proxy",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch HTML via Proxy": {
+      "main": [
+        [
+          {
+            "node": "Process & Aggregate Weekly",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Process & Aggregate Weekly": {
+      "main": [
+        [
+          {
+            "node": "Download Chart Image",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Download Chart Image": {
+      "main": [
+        [
+          {
+            "node": "Telegram Send Chart",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Telegram Send Chart": {
+      "main": [
+        [
+          {
+            "node": "Create Markdown File",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Markdown File": {
+      "main": [
+        [
+          {
+            "node": "Telegram Send Report File",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Append to Weekly_Log Sheet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Telegram Send Report File": {
+      "main": [
+        []
+      ]
+    },
+    "Process & Aggregate Daily": {
+      "main": [
+        [
+          {
+            "node": "Create Markdown File Daily",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Markdown File Daily": {
+      "main": [
+        [
+          {
+            "node": "Telegram Alert Daily",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Append to Log Sheet Daily",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Telegram Trigger1": {
+      "main": [
+        [
+          {
+            "node": "Read Pages Sheet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "Read Pages Sheet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Pages Sheet": {
+      "main": [
+        [
+          {
+            "node": "Prepare Active Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Active Items": {
+      "main": [
+        [
+          {
+            "node": "HTTP Yandex Proxy",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Yandex Proxy": {
+      "main": [
+        [
+          {
+            "node": "Process & Aggregate Daily",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "nodeGroups": [],
+  "tags": []
+}
