@@ -1,0 +1,1819 @@
+{
+  "name": "AI Visibility Monitor",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "3a9a9e01-09fd-45fd-b3bb-a6366cafe4c7",
+      "name": "Manual Trigger — AI Visibility",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        159232,
+        -12720
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const now = new Date();\nreturn [{json: {\n  SPREADSHEET_ID: 'YOUR_GOOGLE_SHEET_ID',\n  CHAT_ID: 'YOUR_TELEGRAM_CHAT_ID',\n  YANDEX_FOLDER_ID: 'YOUR_YANDEX_CLOUD_FOLDER_ID',\n  YANDEX_API_KEY: 'YOUR_YANDEX_API_KEY',\n  YANDEX_ENABLED: true,\n  BRAND: 'Booster',\n  DOMAIN: 'boosterpro.ru',\n  RUN_MODE: String($input.first()?.json?.run_mode || 'FULL'),\n  RUN_SOURCE: String($input.first()?.json?.run_source || 'manual-full'),\n  RUN_ID: now.toISOString(),\n  GPT_MODEL: 'openai/gpt-4.1-nano',\n  GEMINI_MODEL: 'google/gemini-3.1-flash-lite',\n  QWEN_MODEL: 'qwen/qwen3.6-27b',\n  GPT_MAX_TOKENS: 160,\n  GEMINI_MAX_TOKENS: 120,\n  QWEN_MAX_TOKENS: 120,\n  TEST_WEB_RESULTS: 3,\n  MIN_COVERAGE: 0.80,\n  DEV_QUERY_COUNT: 0,\n  MAX_PRIMARY_COUNT: 20,\n  SAVE_ONLY_FULL: false,\n  YANDEX_RUB_PER_REQUEST: 5.08,\n  DRIVE_FOLDER_NAME: 'AI_Visibility_Reports',\n  SAVE_RESULTS: true,\n  NOTE: 'FULL production: all ai_monitor=YES categories (fallback: all valid Master_Briefs rows). Hard safety cap 20 categories: if exceeded, workflow stops before paid AI requests. FULL State is isolated from DEV by FULL|provider|slug keys. Monthly schedule: day 10, 10:00 Europe/Moscow.'\n}}];"
+      },
+      "id": "4397ea5e-a34e-489b-915a-6b27f083d06b",
+      "name": "Config — AI Visibility",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        159744,
+        -12800
+      ]
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "YOUR_GOOGLE_SHEET_ID",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Master_Briefs",
+          "mode": "name"
+        },
+        "options": {}
+      },
+      "id": "0427c104-8466-4027-9bc7-dc7a6f7a3bdf",
+      "name": "Read Master_Briefs",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        161136,
+        -12704
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "mtZFJ1tKr9CHmp0i",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "YOUR_GOOGLE_SHEET_ID",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Daily_Monitor",
+          "mode": "name"
+        },
+        "options": {}
+      },
+      "id": "f04f68fd-8f3d-449a-8317-6a771d0dd331",
+      "name": "Read Daily_Monitor",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        161376,
+        -12704
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "mtZFJ1tKr9CHmp0i",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "YOUR_GOOGLE_SHEET_ID",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "AI_Visibility_State",
+          "mode": "name"
+        },
+        "options": {}
+      },
+      "id": "b6281201-6695-4a7e-a024-088a66171710",
+      "name": "Read AI_Visibility_State",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        165344,
+        -12704
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "mtZFJ1tKr9CHmp0i",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const cfg = $('Config — AI Visibility').first().json;\nconst master = $('Read Master_Briefs').all().map(i => i.json || {});\nconst daily = $('Read Daily_Monitor').all().map(i => i.json || {});\n\nconst clean = v => String(v ?? '').trim();\nconst norm = v => clean(v).toLowerCase().replace(/ё/g,'е').replace(/[–—]/g,'-').replace(/\\s+/g,' ');\nconst yes = v => v === true || /^(1|true|yes|y|да|on)$/i.test(clean(v));\nconst slugFromUrl = u => clean(u).replace(/\\/$/, '').split('/').pop();\nconst pick = (...vals) => vals.map(clean).find(Boolean) || '';\n\nconst dBySlug = new Map();\nfor (const d of daily) {\n  if (clean(d.type) !== 'target' || !yes(d.active)) continue;\n  dBySlug.set(slugFromUrl(d.url), d);\n}\n\nconst candidates = master.filter(m => clean(m.slug) && clean(m.primary_query) && clean(m.category));\nif (!candidates.length) throw new Error('Master_Briefs: нет строк с slug + category + primary_query');\n\n// Production allow-list: if at least one row has ai_monitor=YES,\n// only those rows are part of FULL. Otherwise use all valid rows.\nconst marked = candidates.filter(m => yes(m.ai_monitor));\nconst pool = marked.length ? marked : candidates;\n\n// De-duplicate by slug, keep Master_Briefs order.\nconst unique = [];\nconst seen = new Set();\nfor (const m of pool) {\n  const slug = clean(m.slug);\n  if (!slug || seen.has(slug)) continue;\n  seen.add(slug);\n  unique.push(m);\n}\n\nconst hardCap = Number(cfg.MAX_PRIMARY_COUNT || 20);\nif (unique.length > hardCap) {\n  throw new Error(`FULL safety stop: найдено ${unique.length} категорий, hard cap = ${hardCap}. Платные AI-запросы НЕ запущены.`);\n}\n\n// Keep core generic query first when present; then all remaining categories.\n// Branded control is allowed and simply excluded from non-branded visibility denominator.\nconst preferred = unique.find(m => norm(m.primary_query) === 'перкуссионный массажер');\nconst rows = preferred\n  ? [preferred, ...unique.filter(m => m !== preferred)]\n  : unique;\n\nconst runId = cfg.RUN_ID || new Date().toISOString();\nreturn rows.map((m, idx) => {\n  const slug = clean(m.slug);\n  const d = dBySlug.get(slug) || {};\n  const query = clean(m.primary_query);\n  const brandedControl = /\\bbooster\\b/i.test(query);\n  const expectedNames = pick(m.expected_names, d.expected_names);\n  const names = expectedNames.split(',').map(s => s.trim()).filter(Boolean);\n  const boosterModels = names.filter(n => /\\bbooster\\b/i.test(n));\n  const ownerUrl = pick(m.owner_url, m.url, d.url, `https://boosterpro.ru/collection/${slug}`);\n  const prompt = `Пользователь из России ищет: «${query}». Назови до 5 конкретных брендов или моделей, которые ты бы рекомендовал сейчас. Только список названий, без объяснений. Не ограничивайся одним брендом.`;\n\n  return {json:{\n    run_id: runId,\n    run_mode: cfg.RUN_MODE,\n    run_source: cfg.RUN_SOURCE,\n    query_index: idx + 1,\n    slug,\n    page_id: clean(m.page_id),\n    category: clean(m.category),\n    query,\n    owner_url: ownerUrl,\n    expected_h1: pick(m.h1, m.H1, m.expected_h1, d.expected_h1),\n    expected_title: pick(m.title, m.Title, m.expected_title, d.expected_title),\n    expected_desc: pick(m.description, m.meta_description, m.desc, m.expected_desc, d.expected_desc),\n    expected_names: expectedNames,\n    booster_models: boosterModels,\n    score_eligible: brandedControl ? 'no' : 'yes',\n    brand_control: brandedControl ? 'yes' : 'no',\n    prompt\n  }};\n});"
+      },
+      "id": "b8a97d6a-c71b-46fe-970d-1b9c89b37ba0",
+      "name": "Build AI Visibility Queries",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        161856,
+        -12704
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "let base = $('Build AI Visibility Queries').all().map(i => i.json);\nconst cfg = $('Config — AI Visibility').first().json;\n// FULL safety cap: query builder has already validated <= MAX_PRIMARY_COUNT.\nconst cap = Math.max(1, Number(cfg.MAX_PRIMARY_COUNT || 20));\nbase = base.slice(0, cap);\nreturn base.map(x => {\n  const requestBody = {\n    messages: [{ content: x.prompt, role: 'ROLE_USER' }],\n    folderId: cfg.YANDEX_FOLDER_ID,\n    fixMisspell: true,\n    enableRichStructuredAnswer: true,\n    getPartialResults: false\n  };\n  return {json:{\n    ...x,\n    provider:'yandex',\n    provider_label:'Яндекс / GenSearch',\n    model:'yandex-gensearch',\n    request_body: JSON.stringify(requestBody)\n  }};\n});"
+      },
+      "id": "bcd919a2-e7ae-4da2-9c82-0bd411a84105",
+      "name": "Prepare Yandex Tasks",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        162096,
+        -12704
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://searchapi.api.cloud.yandex.net/v2/gen/search",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ 'Api-Key ' + $('Config — AI Visibility').first().json.YANDEX_API_KEY }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.request_body }}",
+        "options": {
+          "batching": {
+            "batch": {
+              "batchSize": 1,
+              "batchInterval": 900
+            }
+          },
+          "response": {
+            "response": {
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "id": "88738aed-a4cf-4d56-9989-4cf60c2d53ce",
+      "name": "Yandex GenSearch",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        162336,
+        -12704
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const tasks = $('Prepare Yandex Tasks').all().map(i => i.json);\nconst res = $('Yandex GenSearch').all().map(i => i.json || {});\nconst domain = String($('Config — AI Visibility').first().json.DOMAIN || 'boosterpro.ru').toLowerCase();\nconst uniq = a => [...new Set(a.filter(Boolean))];\nconst escText = x => String(x ?? '');\nreturn tasks.map((t, idx) => {\n  let r = res[idx] || {};\n  if (r.body && typeof r.body === 'object') r = r.body;\n\n  // Successful GenSearch response: message is an object with message.content.\n  const text = escText(r?.message?.content || r?.content || r?.answer || '');\n  const sources = Array.isArray(r?.sources) ? r.sources : [];\n  const allSourceUrls = uniq(sources.map(s => escText(s?.url)));\n  const usedSourceUrls = uniq(sources.filter(s => s?.used === true).map(s => escText(s?.url)));\n  const textUrls = text.match(/https?:\\/\\/[^\\s)\\]}>]+/g) || [];\n  const urls = uniq([...usedSourceUrls, ...textUrls]);\n\n  const brandMentioned = /\\bbooster\\b/i.test(text);\n  const models = (t.booster_models || []).filter(m => text.toLowerCase().includes(String(m).toLowerCase()));\n\n  // 'site_cited' means Yandex actually USED boosterpro.ru as a source, not merely found it in candidates.\n  const siteCited = usedSourceUrls.some(u => u.toLowerCase().includes(domain)) || new RegExp(domain.replace('.', '\\\\.'), 'i').test(text);\n  const siteFoundCandidate = allSourceUrls.some(u => u.toLowerCase().includes(domain));\n\n  // API errors have numeric code and string message. A successful response has message as an object.\n  const code = r?.code ?? r?.error?.code ?? '';\n  const apiMsg = typeof r?.message === 'string'\n    ? r.message\n    : (typeof r?.error?.message === 'string' ? r.error.message : '');\n  const rejected = r?.isAnswerRejected === true || r?.problematicAnswer === true;\n  let errorText = '';\n  if (code || apiMsg) errorText = `${code ? 'code='+code+'; ' : ''}${apiMsg || 'api_error'}`;\n  else if (rejected) errorText = 'answer_rejected_or_problematic';\n  else if (!text) errorText = 'empty_response';\n\n  return {json:{...t,\n    checked_at:new Date().toISOString(),\n    provider_disabled:false,\n    brand_mentioned:brandMentioned,\n    site_cited:siteCited,\n    site_found_candidate:siteFoundCandidate,\n    models_mentioned:models.join(', '),\n    source_urls:urls.join('\\n'),\n    source_urls_all:allSourceUrls.join('\\n'),\n    answer_text:text.slice(0,45000),\n    api_cost:0,\n    web_search_requests:1,\n    data_error:!!errorText,\n    error:errorText.slice(0,1000)\n  }};\n});"
+      },
+      "id": "61d6bdd4-db8e-43b4-a655-7fc6a315144f",
+      "name": "Normalize Yandex",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        162576,
+        -12704
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "let base = $('Build AI Visibility Queries').all().map(i => i.json);\nconst cfg = $('Config — AI Visibility').first().json;\nconst cap = Math.max(1, Number(cfg.MAX_PRIMARY_COUNT || 20));\nbase = base.slice(0, cap);\n\nconst systemPrompt = \"Ты независимый помощник по выбору товара для российского пользователя. Перед ответом ОБЯЗАТЕЛЬНО используй доступный web search ровно один раз. После поиска верни только до 5 конкретных брендов или моделей, по одному на строку, без пояснений.\";\n\nreturn base.map(x => {\n  const model = cfg.GPT_MODEL;\n  const requestBody = {\n    model,\n    messages: [\n      { role: 'system', content: systemPrompt },\n      { role: 'user', content: x.prompt }\n    ],\n    tools: [{\n      type: 'openrouter:web_search',\n      parameters: {\n        engine: 'exa',\n        max_results: Number(cfg.TEST_WEB_RESULTS || 3),\n        max_total_results: Number(cfg.TEST_WEB_RESULTS || 3),\n        search_context_size: 'low'\n      }\n    }],\n    tool_choice: 'required',\n    temperature: 0,\n    max_tokens: Number(cfg.GPT_MAX_TOKENS),\n    provider: { sort: 'price' }\n  };\n\n  return {json:{\n    ...x,\n    provider:'gpt',\n    provider_label:'GPT',\n    model,\n    api_model:model,\n    web_engine:'server-tool-exa-required',\n    request_body:JSON.stringify(requestBody)\n  }};\n});"
+      },
+      "id": "0bd4e3b0-68ff-4848-aa86-76f44df9d947",
+      "name": "Prepare GPT Tasks",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        162816,
+        -12704
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://openrouter.ai/api/v1/chat/completions",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "openAiApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "X-Title",
+              "value": "BoosterPro AI Visibility"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.request_body }}",
+        "options": {
+          "batching": {
+            "batch": {
+              "batchSize": 1,
+              "batchInterval": 1100
+            }
+          },
+          "response": {
+            "response": {
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "id": "4a778acb-a3ec-4b22-87c2-06e0633a4ca4",
+      "name": "GPT Web Answer",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        163056,
+        -12704
+      ],
+      "credentials": {
+        "openAiApi": {
+          "id": "hLZMz39dXwp0ew3x",
+          "name": "OpenAi account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const tasks = $('Prepare GPT Tasks').all().map(i => i.json);\nconst res = $input.all().map(i => i.json || {});\nconst domain = String($('Config — AI Visibility').first().json.DOMAIN || 'boosterpro.ru').toLowerCase();\nconst uniq = a => [...new Set(a.filter(Boolean))];\nreturn tasks.map((t, idx) => {\n  let r = res[idx] || {};\n  if (r.body && typeof r.body === 'object') r = r.body;\n  const msg = r?.choices?.[0]?.message || {};\n  const text = String(msg?.content ?? r?.text ?? r?.output ?? r?.response ?? '');\n  const anns = Array.isArray(msg?.annotations) ? msg.annotations : [];\n  const annUrls = anns.filter(a => a?.type === 'url_citation' && a?.url_citation?.url).map(a => String(a.url_citation.url));\n  const textUrls = text.match(/https?:\\/\\/[^\\s)\\]}]+/g) || [];\n  const urls = uniq([...annUrls, ...textUrls].map(u => u.replace(/[.,;]+$/,'')));\n  const brandMentioned = /\\bbooster\\b/i.test(text);\n  const models = (t.booster_models || []).filter(m => text.toLowerCase().includes(String(m).toLowerCase()));\n  const siteCited = urls.some(u => u.toLowerCase().includes(domain)) || new RegExp(domain.replace('.', '\\\\.'), 'i').test(text);\n  const apiError = r?.error?.message || r?.error || '';\n  const finish = String(r?.choices?.[0]?.finish_reason || r?.choices?.[0]?.native_finish_reason || '');\n  const usage = r?.usage || {};\n  const webRequests = Number(usage?.server_tool_use_details?.web_search_requests || 0);\n  const webEvidence = annUrls.length > 0 || webRequests > 0;\n  const diag = !text\n    ? `empty_response; finish=${finish || 'unknown'}; prompt_tokens=${usage.prompt_tokens ?? '?'}; completion_tokens=${usage.completion_tokens ?? '?'}; web_search_requests=${webRequests}; cost=${usage.cost ?? '?'}`\n    : (!webEvidence ? `no_web_evidence; prompt_tokens=${usage.prompt_tokens ?? '?'}; completion_tokens=${usage.completion_tokens ?? '?'}; cost=${usage.cost ?? '?'}` : '');\n  const err = String(apiError || diag);\n  return {json:{...t,\n    checked_at:new Date().toISOString(),\n    brand_mentioned:brandMentioned,\n    site_cited:siteCited,\n    models_mentioned:models.join(', '),\n    source_urls:urls.join('\\n'),\n    answer_text:text.slice(0,45000),\n    api_cost:Number(usage.cost || 0),\n    web_search_requests:webRequests,\n    data_error:!!err,\n    error:err.slice(0,1000)\n  }};\n});"
+      },
+      "id": "c0159c25-b69a-4d77-950b-94fa8f9ba5df",
+      "name": "Normalize GPT",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        163296,
+        -12704
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "let base = $('Build AI Visibility Queries').all().map(i => i.json);\nconst cfg = $('Config — AI Visibility').first().json;\n// FULL safety cap: query builder has already validated <= MAX_PRIMARY_COUNT.\nconst cap = Math.max(1, Number(cfg.MAX_PRIMARY_COUNT || 20));\nbase = base.slice(0, cap);\nconst systemPrompt = \"Ты независимый помощник по выбору товара для российского пользователя. Перед ответом ОБЯЗАТЕЛЬНО используй доступный web search ровно один раз. После поиска верни только до 5 конкретных брендов или моделей, по одному на строку, без пояснений.\";\nreturn base.map(x => {\n  const model = cfg.GEMINI_MODEL;\n  const requestBody = {\n    model,\n    messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: x.prompt }],\n    tools: [{\n      type: 'openrouter:web_search',\n      parameters: {\n        engine: 'exa',\n        max_results: Number(cfg.TEST_WEB_RESULTS || 3),\n        max_total_results: Number(cfg.TEST_WEB_RESULTS || 3),\n        search_context_size: 'low'\n      }\n    }],\n    tool_choice: 'required',\n    temperature: 0,\n    max_tokens: 120,\n    provider: { sort: 'price' }\n  };\n  return {json:{...x, provider:'gemini', provider_label:'Gemini', model, api_model:model, web_engine:'server-tool-exa-required', request_body:JSON.stringify(requestBody)}};\n});"
+      },
+      "id": "39a86107-9065-4b94-ba81-72d286943747",
+      "name": "Prepare Gemini Tasks",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        163536,
+        -12704
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://openrouter.ai/api/v1/chat/completions",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "openAiApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "X-Title",
+              "value": "BoosterPro AI Visibility"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.request_body }}",
+        "options": {
+          "batching": {
+            "batch": {
+              "batchSize": 1,
+              "batchInterval": 1100
+            }
+          },
+          "response": {
+            "response": {
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "id": "5188e8be-4e93-4a40-a8d8-4d408a8586a7",
+      "name": "Gemini Web Answer",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        163776,
+        -12704
+      ],
+      "credentials": {
+        "openAiApi": {
+          "id": "hLZMz39dXwp0ew3x",
+          "name": "OpenAi account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const tasks = $('Prepare Gemini Tasks').all().map(i => i.json);\nconst res = $input.all().map(i => i.json || {});\nconst domain = String($('Config — AI Visibility').first().json.DOMAIN || 'boosterpro.ru').toLowerCase();\nconst uniq = a => [...new Set(a.filter(Boolean))];\nreturn tasks.map((t, idx) => {\n  let r = res[idx] || {};\n  if (r.body && typeof r.body === 'object') r = r.body;\n  const msg = r?.choices?.[0]?.message || {};\n  const text = String(msg?.content ?? r?.text ?? r?.output ?? r?.response ?? '');\n  const anns = Array.isArray(msg?.annotations) ? msg.annotations : [];\n  const annUrls = anns.filter(a => a?.type === 'url_citation' && a?.url_citation?.url).map(a => String(a.url_citation.url));\n  const textUrls = text.match(/https?:\\/\\/[^\\s)\\]}]+/g) || [];\n  const urls = uniq([...annUrls, ...textUrls].map(u => u.replace(/[.,;]+$/,'')));\n  const brandMentioned = /\\bbooster\\b/i.test(text);\n  const models = (t.booster_models || []).filter(m => text.toLowerCase().includes(String(m).toLowerCase()));\n  const siteCited = urls.some(u => u.toLowerCase().includes(domain)) || new RegExp(domain.replace('.', '\\\\.'), 'i').test(text);\n  const apiError = r?.error?.message || r?.error || '';\n  const finish = String(r?.choices?.[0]?.finish_reason || r?.choices?.[0]?.native_finish_reason || '');\n  const usage = r?.usage || {};\n  const webRequests = Number(usage?.server_tool_use_details?.web_search_requests ?? usage?.server_tool_use?.web_search_requests ?? 0);\n  const webEvidence = annUrls.length > 0 || webRequests > 0;\n  const diag = !text\n    ? `empty_response; finish=${finish || 'unknown'}; prompt_tokens=${usage.prompt_tokens ?? '?'}; completion_tokens=${usage.completion_tokens ?? '?'}; web_search_requests=${webRequests}; cost=${usage.cost ?? '?'}`\n    : (!webEvidence ? `no_web_evidence; prompt_tokens=${usage.prompt_tokens ?? '?'}; completion_tokens=${usage.completion_tokens ?? '?'}; cost=${usage.cost ?? '?'}` : '');\n  const err = String(apiError || diag);\n  return {json:{...t,\n    checked_at:new Date().toISOString(),\n    brand_mentioned:brandMentioned,\n    site_cited:siteCited,\n    models_mentioned:models.join(', '),\n    source_urls:urls.join('\\n'),\n    answer_text:text.slice(0,45000),\n    api_cost:Number(usage.cost || 0),\n    web_search_requests:webRequests,\n    data_error:!!err,\n    error:err.slice(0,1000)\n  }};\n});"
+      },
+      "id": "33b9821c-30d2-48aa-8fd0-91487b59de7e",
+      "name": "Normalize Gemini",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        164016,
+        -12704
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "let base = $('Build AI Visibility Queries').all().map(i => i.json);\nconst cfg = $('Config — AI Visibility').first().json;\n// FULL safety cap: query builder has already validated <= MAX_PRIMARY_COUNT.\nconst cap = Math.max(1, Number(cfg.MAX_PRIMARY_COUNT || 20));\nbase = base.slice(0, cap);\nconst systemPrompt = \"Отвечай как независимый помощник по выбору товара для российского пользователя. Используй приложенный веб-контекст. Верни только до 5 конкретных брендов или моделей, по одному на строку, без пояснений.\";\nreturn base.map(x => {\n  const model = cfg.QWEN_MODEL;\n  const apiModel = model.endsWith(':online') ? model : model + ':online';\n  const requestBody = {\n    model: apiModel,\n    messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: x.prompt }],\n    plugins: [{\n      id: 'web',\n      max_results: Number(cfg.TEST_WEB_RESULTS || 1),\n      search_prompt: 'Ниже результаты актуального веб-поиска. Используй их как контекст, но не копируй рейтинг одного источника механически. Учитывай российский рынок.'\n    }],\n    temperature: 0,\n    reasoning: { enabled: false },\n    max_tokens: Number(cfg.QWEN_MAX_TOKENS),\n    provider: { sort: 'price' }\n  };\n  return {json:{...x, provider:'qwen', provider_label:'Qwen', model, api_model:apiModel, web_engine:'web-plugin-qwen', request_body:JSON.stringify(requestBody)}};\n});"
+      },
+      "id": "1e527d54-a7a1-416f-8db0-b07ae2723395",
+      "name": "Prepare Qwen Tasks",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        164256,
+        -12704
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://openrouter.ai/api/v1/chat/completions",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "openAiApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "X-Title",
+              "value": "BoosterPro AI Visibility"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.request_body }}",
+        "options": {
+          "batching": {
+            "batch": {
+              "batchSize": 1,
+              "batchInterval": 1100
+            }
+          },
+          "response": {
+            "response": {
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "id": "3517b5d6-ae76-4933-80bf-fb1912a09f0c",
+      "name": "Qwen Web Answer",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        164496,
+        -12704
+      ],
+      "credentials": {
+        "openAiApi": {
+          "id": "hLZMz39dXwp0ew3x",
+          "name": "OpenAi account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const tasks = $('Prepare Qwen Tasks').all().map(i => i.json);\nconst res = $input.all().map(i => i.json || {});\nconst domain = String($('Config — AI Visibility').first().json.DOMAIN || 'boosterpro.ru').toLowerCase();\nconst uniq = a => [...new Set(a.filter(Boolean))];\nreturn tasks.map((t, idx) => {\n  let r = res[idx] || {};\n  if (r.body && typeof r.body === 'object') r = r.body;\n  const msg = r?.choices?.[0]?.message || {};\n  const text = String(msg?.content ?? r?.text ?? r?.output ?? r?.response ?? '');\n  const anns = Array.isArray(msg?.annotations) ? msg.annotations : [];\n  const annUrls = anns.filter(a => a?.type === 'url_citation' && a?.url_citation?.url).map(a => String(a.url_citation.url));\n  const textUrls = text.match(/https?:\\/\\/[^\\s)\\]}]+/g) || [];\n  const urls = uniq([...annUrls, ...textUrls].map(u => u.replace(/[.,;]+$/,'')));\n  const brandMentioned = /\\bbooster\\b/i.test(text);\n  const models = (t.booster_models || []).filter(m => text.toLowerCase().includes(String(m).toLowerCase()));\n  const siteCited = urls.some(u => u.toLowerCase().includes(domain)) || new RegExp(domain.replace('.', '\\\\.'), 'i').test(text);\n  const apiError = r?.error?.message || r?.error || '';\n  const finish = String(r?.choices?.[0]?.finish_reason || r?.choices?.[0]?.native_finish_reason || '');\n  const usage = r?.usage || {};\n  const webRequests = Number(usage?.server_tool_use_details?.web_search_requests || 0);\n  const webEvidence = annUrls.length > 0 || webRequests > 0;\n  const diag = !text\n    ? `empty_response; finish=${finish || 'unknown'}; prompt_tokens=${usage.prompt_tokens ?? '?'}; completion_tokens=${usage.completion_tokens ?? '?'}; web_search_requests=${webRequests}; cost=${usage.cost ?? '?'}`\n    : (!webEvidence ? `no_web_evidence; prompt_tokens=${usage.prompt_tokens ?? '?'}; completion_tokens=${usage.completion_tokens ?? '?'}; cost=${usage.cost ?? '?'}` : '');\n  const err = String(apiError || diag);\n  return {json:{...t,\n    checked_at:new Date().toISOString(),\n    brand_mentioned:brandMentioned,\n    site_cited:siteCited,\n    models_mentioned:models.join(', '),\n    source_urls:urls.join('\\n'),\n    answer_text:text.slice(0,45000),\n    api_cost:Number(usage.cost || 0),\n    web_search_requests:webRequests,\n    data_error:!!err,\n    error:err.slice(0,1000)\n  }};\n});"
+      },
+      "id": "056745a6-8b27-4d81-a3f9-4cf67d6dfe72",
+      "name": "Normalize Qwen",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        164736,
+        -12704
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const all = [\n  ...$('Normalize Yandex').all(),\n  ...$('Normalize GPT').all(),\n  ...$('Normalize Gemini').all(),\n  ...$('Normalize Qwen').all()\n].map(i => i.json || {});\n\nconst hash = s => {\n  let h = 2166136261;\n  for (const ch of String(s)) { h ^= ch.charCodeAt(0); h = Math.imul(h, 16777619); }\n  return (h >>> 0).toString(16);\n};\nreturn all.map(r => ({json:{...r,\n  state_key:`${String(r.run_mode || 'FULL')}|${r.provider}|${r.slug}`,\n  history_key:`${String(r.run_mode || 'FULL')}|${r.run_id}|${r.provider}|${r.slug}`,\n  state_hash:hash(`${r.brand_mentioned}|${r.site_cited}|${r.models_mentioned}|${r.answer_text}`)\n}}));"
+      },
+      "id": "dff1b39c-44ef-4614-be06-641d07c93497",
+      "name": "Collect AI Results",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        164976,
+        -12704
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const results = $('Collect AI Results').all().map(i => i.json || {});\nconst cfg = $('Config — AI Visibility').first().json;\nconst runMode = String(cfg.RUN_MODE || 'DEV1');\nconst prevRaw = $('Read AI_Visibility_State').all()\n  .map(i => i.json || {})\n  .filter(x => x.provider && x.slug && String(x.state_key || '').startsWith(`${runMode}|`));\nconst providers = [['yandex','Яндекс'],['gpt','GPT'],['gemini','Gemini'],['qwen','Qwen']];\nconst baseRows = $('Build AI Visibility Queries').all().map(i => i.json || {});\nconst eligibleSlugs = [...new Set(results.filter(r => r.score_eligible === 'yes').map(r => String(r.slug || '')))];\nconst eligibleSet = new Set(eligibleSlugs);\nconst totalEligible = eligibleSlugs.length;\nconst MIN_COVERAGE = Number(cfg.MIN_COVERAGE || 0.80);\nconst isErr = r => !r || r.data_error === true || String(r.data_error).toLowerCase()==='true';\nconst isTrue = v => v === true || String(v).toLowerCase()==='true';\nconst pct = (n,d) => d ? Math.round(n/d*100) : null;\nconst pp = (a,b) => (Number.isFinite(a) && Number.isFinite(b)) ? a-b : null;\nconst deltaTxt = d => d === null ? '—' : d > 0 ? `(Δ +${d} п.п.) 🔼` : d < 0 ? `(Δ -${Math.abs(d)} п.п.) 🔻` : `(Δ 0 п.п.) ➖`;\n// Graphviz/PNG: only plain text glyphs. Direction is shown by font color,\n// so QuickChart cannot render emoji/tofu squares here.\nconst deltaTxtChart = d => d === null ? '—' : d > 0 ? `+${d} п.п.` : d < 0 ? `-${Math.abs(d)} п.п.` : `0 п.п.`;\nconst deltaColorChart = d => d === null ? '#b9c4d0' : d > 0 ? '#73d89d' : d < 0 ? '#ff8f98' : '#b9c4d0';\nconst esc = s => String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\"/g,'&quot;');\n\n// ---------- Реально использованные/процитированные источники ----------\nconst providerLabels = {yandex:'Яндекс',gpt:'GPT',gemini:'Gemini',qwen:'Qwen'};\nconst domainOf = u => {\n  const s = String(u || '').trim();\n  const m = s.match(/^https?:\\/\\/([^\\/?#]+)/i);\n  return m ? m[1].replace(/^www\\./i,'').toLowerCase() : '';\n};\nconst buildSourceStats = rows => {\n  const map = new Map();\n  for (const r of rows) {\n    const p = String(r.provider || '').toLowerCase();\n    if (!providerLabels[p] || isErr(r)) continue;\n    if (!eligibleSet.has(String(r.slug || ''))) continue;\n    const urls = String(r.source_urls || '').split(/\\r?\\n/).map(x=>x.trim()).filter(Boolean);\n    const domains = [...new Set(urls.map(domainOf).filter(Boolean))];\n    for (const domain of domains) {\n      if (!map.has(domain)) map.set(domain,{domain,uses:0,yandex:0,gpt:0,gemini:0,qwen:0,providers:new Set(),answers:new Set()});\n      const s=map.get(domain);\n      const answerKey=`${p}|${String(r.slug || '')}`;\n      if (!s.answers.has(answerKey)) {\n        s.answers.add(answerKey);\n        s.uses++;\n        s[p]++;\n        s.providers.add(providerLabels[p]);\n      }\n    }\n  }\n  let arr=[...map.values()].map(s=>({domain:s.domain,uses:s.uses,yandex:s.yandex,gpt:s.gpt,gemini:s.gemini,qwen:s.qwen,providers:[...s.providers]}))\n    .sort((a,b)=>b.uses-a.uses || a.domain.localeCompare(b.domain));\n  const total=arr.reduce((sum,s)=>sum+Number(s.uses||0),0);\n  arr=arr.map(s=>({...s,pct:total ? Math.round((Number(s.uses||0)/total)*1000)/10 : 0}));\n  return {arr,total};\n};\nconst currentSources=buildSourceStats(results);\nlet sourceStats=currentSources.arr;\nconst totalSourceUses=currentSources.total;\nconst previousSources=buildSourceStats(prevRaw);\n\n// Source dynamics are valid only when the previous State covers the SAME\n// current slug set for every active provider. This prevents DEV1 -> DEV4\n// from being shown as fake +7 / +3 growth.\nconst hasComparableSourceBaseline = totalEligible > 0 && providers.every(([p]) => {\n  const prev = prevRaw.filter(r =>\n    r.provider===p &&\n    eligibleSet.has(String(r.slug || '')) &&\n    String(r.score_eligible)==='yes' &&\n    !isErr(r)\n  );\n  return (prev.length / totalEligible) >= MIN_COVERAGE;\n});\n\nconst prevSourceMap=new Map(previousSources.arr.map(s=>[s.domain,s]));\nsourceStats=sourceStats.map(s=>({\n  ...s,\n  delta_uses:hasComparableSourceBaseline\n    ? Number(s.uses||0)-Number(prevSourceMap.get(s.domain)?.uses||0)\n    : null\n}));\nconst boosterSourceUses = sourceStats.find(s=>s.domain==='boosterpro.ru')?.uses || 0;\nconst boosterSourcePct = totalSourceUses ? Math.round((boosterSourceUses/totalSourceUses)*1000)/10 : 0;\n\n// ---------- Метрики по AI + динамика по тем же slug ----------\nconst stats = {};\nfor (const [p,label] of providers) {\n  const providerRows = results.filter(r => r.provider===p);\n  const disabled = providerRows.length > 0 && providerRows.every(r => r.provider_disabled === true || String(r.provider_disabled).toLowerCase()==='true');\n  const curAll = providerRows.filter(r => r.score_eligible==='yes' && eligibleSet.has(String(r.slug || '')));\n  const cur = curAll.filter(r => !isErr(r));\n  const errors = curAll.length-cur.length;\n  const coverage = totalEligible ? cur.length/totalEligible : 0;\n  const publishable = coverage >= MIN_COVERAGE;\n  const brand = cur.filter(r => isTrue(r.brand_mentioned)).length;\n  const cited = cur.filter(r => isTrue(r.site_cited)).length;\n  const rawBrandPct = pct(brand,cur.length);\n  const rawCitedPct = pct(cited,cur.length);\n  const brandPct = publishable ? rawBrandPct : null;\n  const citedPct = publishable ? rawCitedPct : null;\n\n  const prev = prevRaw.filter(r => r.provider===p && eligibleSet.has(String(r.slug || '')) && String(r.score_eligible)==='yes' && !isErr(r));\n  const prevCoverage = totalEligible ? prev.length/totalEligible : 0;\n  const hasPrevious = prevCoverage >= MIN_COVERAGE;\n  let prevBrandPct=null, prevCitedPct=null;\n  if (hasPrevious) {\n    prevBrandPct=pct(prev.filter(r=>isTrue(r.brand_mentioned)).length,prev.length);\n    prevCitedPct=pct(prev.filter(r=>isTrue(r.site_cited)).length,prev.length);\n  }\n  stats[p]={label,disabled,total:totalEligible,valid:cur.length,errors,coverage:Math.round(coverage*100),publishable,\n    brand,cited,brandPct,citedPct,rawBrandPct,rawCitedPct,hasPrevious,prevBrandPct,prevCitedPct,\n    dBrand:hasPrevious?pp(brandPct,prevBrandPct):null,dCited:hasPrevious?pp(citedPct,prevCitedPct):null};\n}\n\nconst providerCosts = Object.fromEntries(providers.map(([p]) => [p, results.filter(r=>r.provider===p).reduce((s,r)=>s+Number(r.api_cost||0),0)]));\nconst openRouterCost = providerCosts.gpt + providerCosts.gemini + providerCosts.qwen;\nconst yandexSuccessful = results.filter(r=>r.provider==='yandex' && !isErr(r)).length;\nconst yandexEstRub = yandexSuccessful * Number(cfg.YANDEX_RUB_PER_REQUEST || 5.08);\nconst now = new Date(results[0]?.checked_at || Date.now());\nconst date = now.toISOString().slice(0,10);\n\n// ---------- Telegram: результат → динамика → источники ----------\nlet summary = `<b>🤖 AI Visibility · ${date}</b>\\n`;\nfor (const [p,label] of providers) {\n  const s=stats[p];\n  if (s.disabled) { summary += `<b>${label}</b>: отключено\\n`; continue; }\n  if (!s.publishable) { summary += `<b>${label}</b>: недостаточно данных · ${s.valid}/${s.total} · ошибок ${s.errors}\\n`; continue; }\n  summary += `<b>${label}</b>: Booster <b>${s.brand}/${s.valid} (${s.brandPct}%)</b> · Упоминание Boosterpro.ru <b>${s.cited}/${s.valid} (${s.citedPct}%)</b>`;\n  if (s.errors) summary += ` · ошибок ${s.errors}`;\n  summary += `\\n`;\n}\nconst prevProviders=providers.filter(([p])=>stats[p]?.hasPrevious);\nsummary += `\\n📈 <b>Динамика к прошлому сохранённому срезу</b>\\n`;\nif (!prevProviders.length) {\n  summary += `— сравнимого прошлого среза пока нет\\n`;\n} else {\n  for (const [p,label] of prevProviders) {\n    const s=stats[p];\n    summary += `<b>${label}</b>: Booster ${deltaTxt(s.dBrand)} · Boosterpro.ru ${deltaTxt(s.dCited)}\\n`;\n  }\n}\n\nsummary += `\\n🌐 <b>Использованные источники</b> · ${totalSourceUses} использований\\n`;\nif (!sourceStats.length) {\n  summary += `— источников нет\\n`;\n} else {\n  const maxTelegramSources=10;\n  const boosterTg=sourceStats.find(s=>s.domain==='boosterpro.ru' && Number(s.uses||0)>0);\n  let telegramSources=sourceStats.slice(0,maxTelegramSources);\n  if (boosterTg && !telegramSources.some(s=>s.domain==='boosterpro.ru')) {\n    telegramSources=[...sourceStats.filter(s=>s.domain!=='boosterpro.ru').slice(0,maxTelegramSources-1),boosterTg];\n  }\n  telegramSources.forEach((s,i)=>{\n    const who=(s.providers||[]).join(', ')||'—';\n    const delta=s.delta_uses===null||s.delta_uses===undefined?'':s.delta_uses>0?` · (Δ +${s.delta_uses}) 🔼`:s.delta_uses<0?` · (Δ -${Math.abs(s.delta_uses)}) 🔻`:` · (Δ 0) ➖`;\n    const line=`${i+1}. ${esc(s.domain)} — ${Number(s.pct||0).toFixed(1)}% · ${s.uses} · ${esc(who)}${delta}`;\n    summary += s.domain==='boosterpro.ru' ? `<b>${line}</b>\\n` : `${line}\\n`;\n  });\n  const hiddenCount=Math.max(0,sourceStats.length-telegramSources.length);\n  if (hiddenCount) summary += `… ещё ${hiddenCount} источников — в полном отчёте\\n`;\n}\n\n// ---------- Матрица ----------\nconst cell = r => {\n  if (r && (r.provider_disabled === true || String(r.provider_disabled).toLowerCase()==='true')) return ['отключено','#343b46','#b8c0cc'];\n  if (!r || isErr(r)) return ['ошибка','#6a3a17','#ffd6a3'];\n  const b=isTrue(r.brand_mentioned), c=isTrue(r.site_cited);\n  if (b&&c) return ['Booster + источник','#24543a','#d8f5df'];\n  if (b) return ['Booster','#655819','#fff0a8'];\n  if (c) return ['источник','#244b70','#d8ecff'];\n  return ['—','#5a2e35','#ffd7dc'];\n};\nlet rows='';\nfor (const q of baseRows) {\n  rows += `<TR>`;\n  rows += `<TD WIDTH=\"315\" ALIGN=\"LEFT\" BALIGN=\"LEFT\" BGCOLOR=\"#242c38\"><TABLE WIDTH=\"315\" BORDER=\"0\" CELLBORDER=\"0\" CELLSPACING=\"0\" CELLPADDING=\"0\"><TR><TD ALIGN=\"LEFT\"><FONT COLOR=\"#f3f5f7\"><B>${esc(q.category)}</B></FONT></TD></TR><TR><TD ALIGN=\"LEFT\"><FONT POINT-SIZE=\"9\" COLOR=\"#9ca8b8\">${esc(q.query)}</FONT></TD></TR></TABLE></TD>`;\n  for (const [p] of providers) {\n    const r=results.find(x=>x.provider===p && x.slug===q.slug);\n    const [txt,bg,fg]=cell(r);\n    rows += `<TD WIDTH=\"270\" ALIGN=\"LEFT\" BALIGN=\"LEFT\" BGCOLOR=\"${bg}\"><FONT COLOR=\"${fg}\"><B>${txt}</B></FONT></TD>`;\n  }\n  rows += `</TR>`;\n}\nconst matrixDot = `digraph G { graph [bgcolor=\"#151a22\", pad=\"0.22\"]; node [shape=plain fontname=\"DejaVu Sans\"]; M [label=<\n<TABLE BORDER=\"0\" CELLBORDER=\"1\" CELLSPACING=\"0\" CELLPADDING=\"8\" COLOR=\"#414b59\" BGCOLOR=\"#202733\">\n<TR><TD COLSPAN=\"5\" ALIGN=\"CENTER\" BGCOLOR=\"#151a22\"><FONT COLOR=\"#f3f5f7\" POINT-SIZE=\"19\"><B>AI Visibility · Booster</B></FONT></TD></TR>\n<TR><TD WIDTH=\"315\" ALIGN=\"LEFT\" BGCOLOR=\"#2a3340\"><FONT COLOR=\"#f0f3f7\"><B>КАТЕГОРИЯ / ЗАПРОС</B></FONT></TD><TD WIDTH=\"270\" ALIGN=\"LEFT\" BGCOLOR=\"#2a3340\"><FONT COLOR=\"#f0f3f7\"><B>ЯНДЕКС</B></FONT></TD><TD WIDTH=\"270\" ALIGN=\"LEFT\" BGCOLOR=\"#2a3340\"><FONT COLOR=\"#f0f3f7\"><B>GPT</B></FONT></TD><TD WIDTH=\"270\" ALIGN=\"LEFT\" BGCOLOR=\"#2a3340\"><FONT COLOR=\"#f0f3f7\"><B>GEMINI</B></FONT></TD><TD WIDTH=\"270\" ALIGN=\"LEFT\" BGCOLOR=\"#2a3340\"><FONT COLOR=\"#f0f3f7\"><B>QWEN</B></FONT></TD></TR>\n${rows}\n</TABLE>>]; }`;\n\n// ---------- Шкалы: <20 красный, 20–64 жёлтый, 65+ зелёный ----------\nconst scoreColor = v => {\n  if (!Number.isFinite(v)) return '#3a4350';\n  if (v < 20) return '#a33a3f';\n  if (v < 65) return '#b58a19';\n  return '#2f7a4d';\n};\nconst barCell = v => {\n  if (!Number.isFinite(v)) return `<TABLE BORDER=\"0\" CELLBORDER=\"0\" CELLSPACING=\"0\"><TR><TD WIDTH=\"600\" ALIGN=\"LEFT\" BGCOLOR=\"#3a4350\"><FONT COLOR=\"#d7dee8\"><B>нет данных</B></FONT></TD></TR></TABLE>`;\n  const totalW=600;\n  const w=Math.max(1,Math.round(v/100*totalW));\n  const rest=Math.max(1,totalW-w);\n  return `<TABLE BORDER=\"0\" CELLBORDER=\"0\" CELLSPACING=\"0\"><TR><TD WIDTH=\"${w}\" ALIGN=\"LEFT\" BGCOLOR=\"${scoreColor(v)}\"><FONT COLOR=\"#ffffff\"><B>${v}%</B></FONT></TD><TD WIDTH=\"${rest}\" BGCOLOR=\"#303946\"></TD></TR></TABLE>`;\n};\nlet bars='';\nfor (const [p,label] of providers) {\n  const s=stats[p];\n  const coverage=`${s.valid}/${s.total}`;\n  bars += `<TR>`;\n  bars += `<TD WIDTH=\"350\" ALIGN=\"LEFT\" BGCOLOR=\"#222b36\"><TABLE BORDER=\"0\" CELLBORDER=\"0\" CELLSPACING=\"0\" CELLPADDING=\"6\"><TR><TD ALIGN=\"LEFT\" BGCOLOR=\"#242c38\"><FONT COLOR=\"#f3f5f7\"><B>${label}</B></FONT><BR ALIGN=\"LEFT\"/><FONT POINT-SIZE=\"9\" COLOR=\"#9ca8b8\">данные ${coverage}</FONT></TD></TR><TR><TD ALIGN=\"LEFT\" BGCOLOR=\"#1d2530\"><FONT COLOR=\"#d9e2ee\" POINT-SIZE=\"10\">↳ Упоминание Boosterpro.ru</FONT></TD></TR></TABLE></TD>`;\n  bars += `<TD WIDTH=\"680\" ALIGN=\"LEFT\" BGCOLOR=\"#202733\"><TABLE BORDER=\"0\" CELLBORDER=\"0\" CELLSPACING=\"0\" CELLPADDING=\"6\"><TR><TD ALIGN=\"LEFT\">${barCell(s.brandPct)}</TD></TR><TR><TD ALIGN=\"LEFT\">${barCell(s.citedPct)}</TD></TR></TABLE></TD>`;\n  bars += `<TD WIDTH=\"180\" ALIGN=\"LEFT\" BGCOLOR=\"#202733\"><TABLE BORDER=\"0\" CELLBORDER=\"0\" CELLSPACING=\"0\" CELLPADDING=\"11\"><TR><TD ALIGN=\"LEFT\"><FONT COLOR=\"${deltaColorChart(s.dBrand)}\">${deltaTxtChart(s.dBrand)}</FONT></TD></TR><TR><TD ALIGN=\"LEFT\"><FONT COLOR=\"${deltaColorChart(s.dCited)}\">${deltaTxtChart(s.dCited)}</FONT></TD></TR></TABLE></TD>`;\n  bars += `</TR>`;\n}\nconst barsDot = `digraph G { graph [bgcolor=\"#151a22\", pad=\"0.25\"]; node [shape=plain fontname=\"DejaVu Sans\"]; B [label=<\n<TABLE BORDER=\"0\" CELLBORDER=\"1\" CELLSPACING=\"0\" CELLPADDING=\"7\" COLOR=\"#414b59\" BGCOLOR=\"#202733\">\n<TR><TD COLSPAN=\"3\" ALIGN=\"CENTER\" BGCOLOR=\"#151a22\"><FONT COLOR=\"#f3f5f7\" POINT-SIZE=\"19\"><B>AI Visibility · доля упоминаний и цитирования</B></FONT></TD></TR>\n<TR><TD WIDTH=\"350\" ALIGN=\"LEFT\" BGCOLOR=\"#2a3340\"><FONT COLOR=\"#f0f3f7\"><B>AI</B></FONT></TD><TD WIDTH=\"680\" ALIGN=\"LEFT\" BGCOLOR=\"#2a3340\"><FONT COLOR=\"#f0f3f7\"><B>ВИДИМОСТЬ</B></FONT></TD><TD WIDTH=\"180\" ALIGN=\"LEFT\" BGCOLOR=\"#2a3340\"><FONT COLOR=\"#f0f3f7\"><B>Δ</B></FONT></TD></TR>\n${bars}\n</TABLE>>]; }`;\n\n// ---------- Donut источников: без фиктивного нулевого сектора ----------\nconst sourceChartMax = 9;\n\nconst boosterReal = sourceStats.find(s=>s.domain==='boosterpro.ru') || {\n  domain:'boosterpro.ru', uses:0, pct:0, yandex:0, gpt:0, gemini:0, qwen:0,\n  providers:[], delta_uses:0\n};\n\n// В круг попадают только реально использованные домены.\n// Если boosterpro.ru = 0, отдельного нулевого сектора/маркера НЕТ.\n// Сам boosterpro.ru всегда показываем жирным акцентом в центре.\nconst positiveSources=sourceStats.filter(s=>Number(s.uses||0)>0);\nlet pieItems=positiveSources.slice(0,sourceChartMax);\n\n// boosterpro.ru must NEVER disappear into \"Другие\" when it has real uses.\n// If it is below top-N, reserve the last explicit slot for it.\nif (Number(boosterReal.uses||0)>0 && !pieItems.some(s=>s.domain==='boosterpro.ru')) {\n  pieItems=[\n    ...positiveSources.filter(s=>s.domain!=='boosterpro.ru').slice(0,sourceChartMax-1),\n    boosterReal\n  ];\n}\n\nconst shownDomains = new Set(pieItems.map(s=>s.domain));\nconst pieTail = positiveSources.filter(s=>!shownDomains.has(s.domain));\nif (pieTail.length) {\n  const otherUses = pieTail.reduce((sum,s)=>sum+Number(s.uses||0),0);\n  const otherPct = totalSourceUses ? Math.round((otherUses/totalSourceUses)*1000)/10 : 0;\n  pieItems.push({domain:`Другие (${pieTail.length})`,uses:otherUses,pct:otherPct,providers:[]});\n}\n\nconst normalPalette=['#4F8FF7','#F05D68','#55C2C3','#66B75A','#F2C94C','#9B6BD3','#FF7FA2','#9C755F','#6C8EBF'];\nlet paletteIndex=0;\nconst pieColors=pieItems.map(s=>{\n  if (String(s.domain||'').startsWith('Другие (')) return '#6F7B8B';\n  return normalPalette[(paletteIndex++)%normalPalette.length];\n});\nconst borderColors=pieItems.map(()=> '#0f141d');\nconst borderWidths=pieItems.map(()=> 7);\n\nconst pieLabels=pieItems.map(s=>{\n  const who=(s.providers||[]).length ? ` · ${(s.providers||[]).join(', ')}` : '';\n  const domainLabel = s.domain==='boosterpro.ru' ? 'BOOSTERPRO.RU' : s.domain;\n  return `${domainLabel} — ${Number(s.pct||0).toFixed(1)}% · ${s.uses} исп.${who}`;\n});\nconst pieData=pieItems.map(s=>Number(s.uses||0));\n\nconst labelsJs=JSON.stringify(pieLabels);\nconst dataJs=JSON.stringify(pieData);\nconst colorsJs=JSON.stringify(pieColors);\nconst borderColorsJs=JSON.stringify(borderColors);\nconst borderWidthsJs=JSON.stringify(borderWidths);\nconst totalUsesJs=Number(totalSourceUses||0);\nconst boosterUsesJs=Number(boosterReal.uses||0);\nconst boosterPctJs=Number(boosterReal.pct||0).toFixed(1);\n\nconst sourceChartCode=`{\n  type:'doughnut',\n  data:{\n    labels:${labelsJs},\n    datasets:[{\n      data:${dataJs},\n      backgroundColor:${colorsJs},\n      borderColor:${borderColorsJs},\n      borderWidth:${borderWidthsJs},\n      borderAlign:'inner',\n      hoverBorderWidth:7\n    }]\n  },\n  options:{\n    responsive:true,\n    maintainAspectRatio:false,\n    cutoutPercentage:62,\n    rotation:-0.5*Math.PI,\n    circumference:2*Math.PI,\n    layout:{padding:{top:34,right:30,bottom:30,left:34}},\n    title:{\n      display:true,\n      text:['AI Visibility · использованные источники','${date} · всего ${totalSourceUses} использований · доля реально использованных'],\n      fontColor:'#F4F7FB',\n      fontFamily:'DejaVu Sans',\n      fontStyle:'bold',\n      fontSize:25,\n      lineHeight:1.35,\n      padding:24\n    },\n    legend:{\n      display:true,\n      position:'right',\n      align:'center',\n      labels:{\n        fontColor:'#E8EDF4',\n        fontFamily:'DejaVu Sans',\n        fontSize:14,\n        boxWidth:16,\n        padding:20,\n        usePointStyle:true\n      }\n    },\n    tooltips:{enabled:false},\n    animation:{duration:0},\n    plugins:{\n      datalabels:{\n        display:function(ctx){ return Number(ctx.dataset.data[ctx.dataIndex]||0) > 0; },\n        color:'#FFFFFF',\n        backgroundColor:'rgba(7,12,20,0.40)',\n        borderColor:'rgba(255,255,255,0.20)',\n        borderWidth:1,\n        borderRadius:7,\n        padding:7,\n        anchor:'center',\n        align:'center',\n        clamp:true,\n        font:{family:'DejaVu Sans',weight:'bold',size:18},\n        formatter:function(value,ctx){\n          var arr=ctx.dataset.data||[];\n          var total=arr.reduce(function(a,b){return a+Number(b||0);},0);\n          if(!total || Number(value||0)<=0)return '';\n          return (Number(value||0)/total*100).toFixed(1)+'%';\n        }\n      },\n      doughnutlabel:{\n        labels:[\n          {text:'${totalUsesJs}',color:'#F4F7FB',font:{family:'DejaVu Sans',size:34,weight:'bold'}},\n          {text:'ИСПОЛЬЗОВАНИЙ',color:'#98A6B8',font:{family:'DejaVu Sans',size:13,weight:'bold'}},\n          {text:'boosterpro.ru: ${boosterUsesJs} исп. · ${boosterPctJs}%',color:'#F4F7FB',font:{family:'DejaVu Sans',size:17,weight:'bold'}}\n        ]\n      }\n    }\n  }\n}`;\nconst sourcesRequestBody={width:1600,height:900,devicePixelRatio:1,format:'png',backgroundColor:'#0f141d',version:'2',chart:sourceChartCode};\n\nreturn [{json:{\n  date,run_id:cfg.RUN_ID,run_mode:runMode,query_count:baseRows.length,total_eligible:totalEligible,\n  stats,openrouter_cost:openRouterCost,yandex_est_cost_rub:yandexEstRub,\n  telegram_summary:summary,matrix_dot:matrixDot,bars_dot:barsDot,\n  matrix_request_body:JSON.stringify({graph:matrixDot,layout:'dot',format:'png',width:1500,height:Math.max(460,260+baseRows.length*58)}),\n  bars_request_body:JSON.stringify({graph:barsDot,layout:'dot',format:'png',width:1450,height:820}),\n  source_stats:sourceStats,total_source_uses:totalSourceUses,booster_source_uses:boosterSourceUses,booster_source_pct:boosterSourcePct,\n  sources_request_body:JSON.stringify(sourcesRequestBody),\n  matrix_caption:`🤖 Матрица AI Visibility · Booster`,\n  bars_caption:`📊 AI Visibility · доля упоминаний и цитирования`,\n  sources_caption:`🌐 AI Visibility · использованные источники · ${totalSourceUses} использований`\n}}];"
+      },
+      "id": "1180f5d7-2c84-4fe2-8fda-d10dd74fc14f",
+      "name": "Build AI Visibility Report",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        165696,
+        -12704
+      ]
+    },
+    {
+      "parameters": {
+        "chatId": "YOUR_TELEGRAM_CHAT_ID",
+        "text": "={{ $('Build AI Visibility Report').first().json.telegram_summary }}",
+        "additionalFields": {
+          "appendAttribution": false,
+          "disable_web_page_preview": true,
+          "parse_mode": "HTML"
+        }
+      },
+      "id": "e440045d-38c1-439f-bcad-89e6bae6108e",
+      "name": "Send AI Visibility Summary",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.1,
+      "position": [
+        165936,
+        -12704
+      ],
+      "webhookId": "b815bf6e-5255-420a-b657-437e30a6681f",
+      "credentials": {
+        "telegramApi": {
+          "id": "xmrISVhnFm7SL0ru",
+          "name": "SEO-monitor"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://quickchart.io/graphviz",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $('Build AI Visibility Report').first().json.matrix_request_body }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "file",
+              "outputPropertyName": "aiMatrix"
+            }
+          }
+        }
+      },
+      "id": "4c8e2787-b109-4008-b8f8-0a1fed6e48d2",
+      "name": "Render AI Matrix",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        166176,
+        -12752
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "sendPhoto",
+        "chatId": "YOUR_TELEGRAM_CHAT_ID",
+        "binaryData": true,
+        "binaryPropertyName": "aiMatrix",
+        "additionalFields": {
+          "caption": "={{ $('Build AI Visibility Report').first().json.matrix_caption }}",
+          "parse_mode": "HTML"
+        }
+      },
+      "id": "b7c176b1-c0b0-4076-a0c7-f6ddde322472",
+      "name": "Send AI Matrix",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.1,
+      "position": [
+        166416,
+        -12752
+      ],
+      "webhookId": "0ac67b9b-6099-4dc4-b2f3-1695854856b2",
+      "credentials": {
+        "telegramApi": {
+          "id": "xmrISVhnFm7SL0ru",
+          "name": "SEO-monitor"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://quickchart.io/graphviz",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $('Build AI Visibility Report').first().json.bars_request_body }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "file",
+              "outputPropertyName": "aiBars"
+            }
+          }
+        }
+      },
+      "id": "7467fe78-e080-4468-95db-82bb19c1810f",
+      "name": "Render AI Visibility Bars",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        166656,
+        -12752
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "sendPhoto",
+        "chatId": "YOUR_TELEGRAM_CHAT_ID",
+        "binaryData": true,
+        "binaryPropertyName": "aiBars",
+        "additionalFields": {
+          "caption": "={{ $('Build AI Visibility Report').first().json.bars_caption }}",
+          "parse_mode": "HTML"
+        }
+      },
+      "id": "b0e64fe5-db69-450b-844f-9be6fb4133ee",
+      "name": "Send AI Visibility Bars",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.1,
+      "position": [
+        166896,
+        -12752
+      ],
+      "webhookId": "3b4e16e2-bb73-4141-87ee-af56c96452ab",
+      "credentials": {
+        "telegramApi": {
+          "id": "xmrISVhnFm7SL0ru",
+          "name": "SEO-monitor"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{json:{read_previous_state:true}}];"
+      },
+      "id": "c704fd57-bd21-4c2f-9dce-c5c987cce31f",
+      "name": "Gate — Read Previous State Once",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        165104,
+        -12704
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{json:{run_mode:'FULL',run_source:'manual-full'}}];"
+      },
+      "id": "85a5a7bc-8beb-4e0f-943c-7df4ae2456e8",
+      "name": "Mode — FULL Manual",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        159472,
+        -12720
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const cfg = $('Config — AI Visibility').first().json;\nconst report = $('Build AI Visibility Report').first().json || {};\nconst queries = $('Build AI Visibility Queries').all().map(i => i.json || {});\nconst normalized = $('Collect AI Results').all().map(i => i.json || {});\nconst providers = [\n  ['yandex','Яндекс','Prepare Yandex Tasks','Yandex GenSearch'],\n  ['gpt','GPT','Prepare GPT Tasks','GPT Web Answer'],\n  ['gemini','Gemini','Prepare Gemini Tasks','Gemini Web Answer'],\n  ['qwen','Qwen','Prepare Qwen Tasks','Qwen Web Answer']\n];\n\nconst rawByProvider = {};\nfor (const [key,label,taskNode,responseNode] of providers) {\n  rawByProvider[key]={\n    tasks:$(taskNode).all().map(i=>i.json||{}),\n    responses:$(responseNode).all().map(i=>i.json||{})\n  };\n}\n\nconst isTrue=v=>v===true||String(v).toLowerCase()==='true';\nconst isErr=r=>!r||r.data_error===true||String(r.data_error).toLowerCase()==='true';\nconst esc=s=>String(s??'')\n  .replace(/&/g,'&amp;')\n  .replace(/</g,'&lt;')\n  .replace(/>/g,'&gt;')\n  .replace(/\"/g,'&quot;');\nconst short=s=>String(s??'').trim();\nconst deltaTxt=d=>d===null||d===undefined?'—':d>0?`(Δ +${d} п.п.) 🔼`:d<0?`(Δ -${Math.abs(d)} п.п.) 🔻`:'(Δ 0 п.п.) ➖';\nconst runId=String(cfg.RUN_ID||normalized[0]?.run_id||new Date().toISOString());\nconst stamp=runId.slice(0,16).replace('T','_').replace(':','');\nconst date=runId.slice(0,10);\nconst rawName=`AI_Visibility_${stamp}_RAW.json`;\nconst htmlName=`AI_Visibility_${stamp}.html`;\n\nconst getRaw=(provider,slug)=>{\n  const pack=rawByProvider[provider];\n  if(!pack)return {};\n  const idx=pack.tasks.findIndex(t=>t.slug===slug);\n  let r=idx>=0?(pack.responses[idx]||{}):{};\n  if(r?.body&&typeof r.body==='object')r=r.body;\n  return r;\n};\n\nlet html=`<!doctype html>\n<html lang=\"ru\">\n<head>\n<meta charset=\"utf-8\">\n<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">\n<title>AI Visibility · Booster · ${esc(date)}</title>\n<style>\n:root{color-scheme:dark;--bg:#0f141d;--card:#171e28;--card2:#202936;--line:#354152;--text:#eef3f8;--muted:#9ba9b9;--green:#2f7a4d;--yellow:#a98017;--red:#92383e;--blue:#29577f;--orange:#ff8a1f}\n*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:15px/1.55 Arial,Helvetica,sans-serif}\n.wrap{max-width:1180px;margin:0 auto;padding:28px}.hero{padding:24px 26px;background:var(--card);border:1px solid var(--line);border-radius:16px;margin-bottom:18px}\nh1,h2,h3,h4{margin:0 0 12px}h1{font-size:28px}.muted{color:var(--muted)}.grid{display:grid;gap:16px}\ntable{width:100%;border-collapse:collapse;background:var(--card);border:1px solid var(--line);border-radius:12px;overflow:hidden}\nth,td{padding:10px 12px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}th{background:#273240}tr:last-child td{border-bottom:0}\ndetails{background:var(--card);border:1px solid var(--line);border-radius:12px;margin:14px 0;overflow:hidden}\ndetails details{background:#121923;margin:12px 0}\nsummary{cursor:pointer;padding:14px 16px;font-weight:700;background:var(--card2);user-select:none}\ndetails[open]>summary{border-bottom:1px solid var(--line)}.inside{padding:14px 16px 18px}\npre{white-space:pre-wrap;word-break:break-word;background:#0b1017;border:1px solid #2b3645;border-radius:10px;padding:14px;max-height:70vh;overflow:auto}\na{color:#77b8ff}.yes{color:#8fe0a8}.no{color:#ff9fa6}.booster{color:#ffad4d;font-weight:800}\n.kpi{display:flex;gap:12px;flex-wrap:wrap;margin-top:12px}.pill{padding:6px 10px;border-radius:999px;background:#252f3d;color:#dbe5ef}\n.small{font-size:13px}.src-booster td{background:rgba(255,138,31,.10);border-top:1px solid rgba(255,138,31,.55);border-bottom:1px solid rgba(255,138,31,.55)}\n</style>\n</head>\n<body><div class=\"wrap\">\n<section class=\"hero\">\n<h1>AI Visibility · Booster · ${esc(date)}</h1>\n<div class=\"kpi\">\n<span class=\"pill\">Режим: ${esc(cfg.RUN_MODE)}</span>\n<span class=\"pill\">Primary: ${queries.length}</span>\n<span class=\"pill\">OpenRouter: $${Number(report.openrouter_cost||0).toFixed(4)}</span>\n<span class=\"pill\">Яндекс: ~${Number(report.yandex_est_cost_rub||0).toFixed(2)} ₽</span>\n</div>\n</section>\n\n<h2>Сводка</h2>\n<table><thead><tr><th>AI</th><th>Успешно</th><th>Booster</th><th>Упоминание Boosterpro.ru</th><th>Δ Booster</th><th>Δ Boosterpro.ru</th><th>Ошибки</th></tr></thead><tbody>`;\n\nfor (const [key,label] of providers) {\n  const s=report.stats?.[key]||{};\n  const bp=Number.isFinite(s.brandPct)?`${s.brandPct}%`:'N/A';\n  const sp=Number.isFinite(s.citedPct)?`${s.citedPct}%`:'N/A';\n  html+=`<tr><td><strong>${esc(label)}</strong></td><td>${s.valid??0}/${s.total??0}</td><td>${s.brand??0} (${bp})</td><td>${s.cited??0} (${sp})</td><td>${esc(deltaTxt(s.dBrand))}</td><td>${esc(deltaTxt(s.dCited))}</td><td>${s.errors??0}</td></tr>`;\n}\nhtml+=`</tbody></table>\n\n<h2 style=\"margin-top:24px\">Использованные источники</h2>`;\n\nconst sourceStats=Array.isArray(report.source_stats)?report.source_stats:[];\nconst totalSourceUses=Number(report.total_source_uses||sourceStats.reduce((sum,s)=>sum+Number(s.uses||0),0));\nconst boosterRow=sourceStats.find(s=>s.domain==='boosterpro.ru') || {domain:'boosterpro.ru',uses:0,pct:0,delta_uses:0,yandex:0,gpt:0,gemini:0,qwen:0};\n\nhtml+=`<p><span class=\"booster\">boosterpro.ru</span>: <strong>${Number(boosterRow.uses||0)} использований (${Number(boosterRow.pct||0).toFixed(1)}%)</strong> · всего ${totalSourceUses}</p>\n<table><thead><tr><th>Домен</th><th>Исп.</th><th>Доля</th><th>Δ use</th><th>Яндекс</th><th>GPT</th><th>Gemini</th><th>Qwen</th></tr></thead><tbody>`;\n\nconst sourceRows=[...sourceStats];\nif(!sourceRows.some(s=>s.domain==='boosterpro.ru')) sourceRows.push(boosterRow);\nfor(const s of sourceRows){\n  const rawDelta=s.delta_uses;\n  const d=(rawDelta===null||rawDelta===undefined)?null:Number(rawDelta);\n  const dt=d===null?'—':d>0?`+${d} 🔼`:d<0?`${d} 🔻`:`0 ➖`;\n  const cls=s.domain==='boosterpro.ru'?' class=\"src-booster\"':'';\n  html+=`<tr${cls}><td>${s.domain==='boosterpro.ru'?'<span class=\"booster\">boosterpro.ru</span>':esc(s.domain)}</td><td>${Number(s.uses||0)}</td><td>${Number(s.pct||0).toFixed(1)}%</td><td>${esc(dt)}</td><td>${Number(s.yandex||0)}</td><td>${Number(s.gpt||0)}</td><td>${Number(s.gemini||0)}</td><td>${Number(s.qwen||0)}</td></tr>`;\n}\nhtml+=`</tbody></table>\n\n<h2 style=\"margin-top:26px\">Ответы по запросам</h2>\n<p class=\"muted\">Все категории и полные ответы свернуты по умолчанию. Нажмите на строку, чтобы раскрыть.</p>`;\n\nfor (const q of queries) {\n  html+=`<details>\n  <summary>${esc(q.category)} · <span class=\"muted\">${esc(q.query)}</span></summary>\n  <div class=\"inside\">\n  <div class=\"small muted\">Target: <a href=\"${esc(q.owner_url)}\">${esc(q.owner_url)}</a></div>`;\n  if(q.expected_h1)html+=`<div class=\"small\">H1: ${esc(q.expected_h1)}</div>`;\n  if(q.expected_title)html+=`<div class=\"small\">Title: ${esc(q.expected_title)}</div>`;\n  if(q.expected_desc)html+=`<div class=\"small\">Description: ${esc(q.expected_desc)}</div>`;\n\n  for (const [key,label] of providers) {\n    const r=normalized.find(x=>x.provider===key&&x.slug===q.slug);\n    const raw=getRaw(key,q.slug);\n    html+=`<h3 style=\"margin-top:22px\">${esc(label)}</h3>`;\n    if(!r||isErr(r)) {\n      html+=`<p class=\"no\"><strong>Ошибка:</strong> ${esc(short(r?.error||raw?.message||raw?.error?.message||'нет ответа'))}</p>`;\n      continue;\n    }\n    html+=`<p>Booster: <strong class=\"${isTrue(r.brand_mentioned)?'yes':'no'}\">${isTrue(r.brand_mentioned)?'ДА':'НЕТ'}</strong> · Упоминание Boosterpro.ru: <strong class=\"${isTrue(r.site_cited)?'yes':'no'}\">${isTrue(r.site_cited)?'ДА':'НЕТ'}</strong></p>`;\n    if(r.models_mentioned)html+=`<p>Найденные модели Booster: ${esc(r.models_mentioned)}</p>`;\n    if(key!=='yandex')html+=`<p class=\"small muted\">Стоимость: $${Number(r.api_cost||0).toFixed(6)}</p>`;\n\n    html+=`<details>\n      <summary>Показать полный ответ ${esc(label)}</summary>\n      <div class=\"inside\"><pre>${esc(r.answer_text||'')}</pre></div>\n    </details>`;\n\n    if(key==='yandex') {\n      const src=Array.isArray(raw?.sources)?raw.sources:[];\n      html+=`<h4>Источники Яндекс</h4><ul>`;\n      if(!src.length)html+=`<li class=\"muted\">Источники не вернулись.</li>`;\n      for(const s of src){\n        const status=s?.used===true?'✅ использован':'○ найден';\n        html+=`<li>${status} · <a href=\"${esc(short(s?.url))}\">${esc(short(s?.title)||short(s?.url))}</a></li>`;\n      }\n      html+=`</ul>`;\n    } else {\n      const msg=raw?.choices?.[0]?.message||{};\n      const anns=Array.isArray(msg?.annotations)?msg.annotations:[];\n      const cites=anns.filter(a=>a?.type==='url_citation'&&a?.url_citation?.url).map(a=>a.url_citation);\n      html+=`<h4>Использованные веб-источники</h4><ul>`;\n      if(!cites.length)html+=`<li class=\"muted\">URL-цитаты не вернулись.</li>`;\n      for(const c of cites){\n        html+=`<li>✅ цитирован · <a href=\"${esc(short(c?.url))}\">${esc(short(c?.title)||short(c?.url))}</a></li>`;\n      }\n      html+=`</ul>`;\n    }\n  }\n  html+=`</div></details>`;\n}\n\nhtml+=`</div></body></html>`;\n\nconst records=queries.map(q=>{\n  const p={};\n  for(const [key,label,taskNode,responseNode] of providers){\n    const pack=rawByProvider[key];\n    const idx=pack.tasks.findIndex(t=>t.slug===q.slug);\n    const task=idx>=0?pack.tasks[idx]:null;\n    const response=idx>=0?pack.responses[idx]:null;\n    const n=normalized.find(x=>x.provider===key&&x.slug===q.slug)||null;\n    let request=null;\n    if(task?.request_body){\n      try{request=JSON.parse(task.request_body)}catch{request=task.request_body}\n    }\n    p[key]={\n      label,\n      request,\n      normalized:n?{\n        checked_at:n.checked_at,model:n.model,brand_mentioned:n.brand_mentioned,\n        site_cited:n.site_cited,site_found_candidate:n.site_found_candidate,\n        models_mentioned:n.models_mentioned,api_cost:n.api_cost,\n        web_search_requests:n.web_search_requests,data_error:n.data_error,error:n.error\n      }:null,\n      response\n    };\n  }\n  return {\n    query:{\n      run_id:q.run_id,slug:q.slug,page_id:q.page_id,category:q.category,query:q.query,\n      owner_url:q.owner_url,expected_h1:q.expected_h1,expected_title:q.expected_title,\n      expected_desc:q.expected_desc,score_eligible:q.score_eligible,brand_control:q.brand_control,prompt:q.prompt\n    },\n    providers:p\n  };\n});\n\nconst rawArchive={\n  schema_version:'1.2',\n  generated_at:new Date().toISOString(),\n  run_id:runId,\n  run_mode:cfg.RUN_MODE,\n  run_source:cfg.RUN_SOURCE,\n  brand:cfg.BRAND,\n  domain:cfg.DOMAIN,\n  query_count:queries.length,\n  note:'Raw provider responses. API secrets and Authorization headers are intentionally NOT stored.',\n  cost:{openrouter_usd:Number(report.openrouter_cost||0),yandex_est_rub:Number(report.yandex_est_cost_rub||0)},\n  source_stats:report.source_stats||[],\n  records\n};\n\nconst htmlBinary=await this.helpers.prepareBinaryData(Buffer.from(html,'utf8'),htmlName,'text/html');\nconst rawBinary=await this.helpers.prepareBinaryData(Buffer.from(JSON.stringify(rawArchive,null,2),'utf8'),rawName,'application/json');\n\nreturn [\n  {json:{kind:'html',file_name:htmlName,run_id:runId,report_date:date},binary:{data:htmlBinary}},\n  {json:{kind:'raw',file_name:rawName,run_id:runId,report_date:date},binary:{data:rawBinary}}\n];"
+      },
+      "id": "6ff7416b-6f8a-4fb7-933c-c257cefd9b3c",
+      "name": "Build HTML + RAW Archive",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        165120,
+        -12560
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "return $input.all().filter(i => i.json?.kind === 'html').map(i => ({json:i.json,binary:i.binary}));"
+      },
+      "id": "4a344fd1-fe3c-4d03-8c50-ac81a2d2cbac",
+      "name": "Pick HTML for Telegram FIRST",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        165424,
+        -12560
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "sendDocument",
+        "chatId": "YOUR_TELEGRAM_CHAT_ID",
+        "binaryData": true,
+        "additionalFields": {
+          "caption": "={{ \"📄 Интерактивный отчёт AI Visibility · \" + $json.report_date }}"
+        }
+      },
+      "id": "75e24e79-81c9-4d53-b0cf-d7294c5d0f3d",
+      "name": "Send AI Visibility HTML",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        165712,
+        -12560
+      ],
+      "additionalFields": {
+        "caption": "={{ \"📄 Интерактивный отчёт AI Visibility · \" + $json.report_date }}"
+      },
+      "webhookId": "ce72ac14-0cab-4ba0-b43e-4b3617f42540",
+      "credentials": {
+        "telegramApi": {
+          "id": "xmrISVhnFm7SL0ru",
+          "name": "SEO-monitor"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://quickchart.io/chart",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $('Build AI Visibility Report').first().json.sources_request_body }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "file",
+              "outputPropertyName": "aiSources"
+            }
+          }
+        }
+      },
+      "id": "52de2d44-da32-4500-8d6b-2a2767c54949",
+      "name": "Render AI Source Domains",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        167136,
+        -12752
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "sendPhoto",
+        "chatId": "YOUR_TELEGRAM_CHAT_ID",
+        "binaryData": true,
+        "binaryPropertyName": "aiSources",
+        "additionalFields": {
+          "caption": "={{ $('Build AI Visibility Report').first().json.sources_caption }}",
+          "parse_mode": "HTML"
+        }
+      },
+      "id": "335cbeee-9300-4358-aad1-81fe638c7df3",
+      "name": "Send AI Source Domains",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.1,
+      "position": [
+        167376,
+        -12752
+      ],
+      "webhookId": "074044b9-6e0c-4fde-add7-4e91858f2b2d",
+      "credentials": {
+        "telegramApi": {
+          "id": "xmrISVhnFm7SL0ru",
+          "name": "SEO-monitor"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "fileFolder",
+        "queryString": "={{ $('Config — AI Visibility').first().json.DRIVE_FOLDER_NAME }}",
+        "returnAll": true,
+        "filter": {
+          "driveId": {
+            "__rl": true,
+            "mode": "list",
+            "value": "My Drive",
+            "cachedResultName": "My Drive",
+            "cachedResultUrl": "https://drive.google.com/drive/my-drive"
+          },
+          "whatToSearch": "folders",
+          "includeTrashed": false
+        },
+        "options": {
+          "fields": [
+            "id",
+            "name",
+            "webViewLink"
+          ]
+        }
+      },
+      "id": "1dcc6029-6a83-4460-9371-a0bcadede047",
+      "name": "Find AI_Visibility_Reports Folder",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        158752,
+        -12976
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "4F0M35X1CjMvUOeU",
+          "name": "Google Drive account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const cfg = $('Config — AI Visibility').first().json;\nconst wanted = String(cfg.DRIVE_FOLDER_NAME || 'AI_Visibility_Reports').trim();\nconst rows = $input.all().map(i => i.json || {}).filter(x => x && x.id);\n\nconst clean = s => String(s || '').trim();\n\n// n8n/Drive search can occasionally surface a duplicated display name such as\n// AI_Visibility_ReportsAI_Visibility_Reports.\n// Prefer exact name, then accept a pure repetition of the configured folder name.\nconst exact = rows.find(r => clean(r.name) === wanted);\n\nconst repeated = rows.find(r => {\n  const name = clean(r.name);\n  if (!name || !wanted || name.length % wanted.length !== 0) return false;\n  const count = name.length / wanted.length;\n  return count >= 2 && wanted.repeat(count) === name;\n});\n\nconst chosen = exact || repeated;\n\nif (!chosen?.id) {\n  const found = rows.map(r => clean(r.name)).filter(Boolean).join(', ');\n  throw new Error(`Google Drive: папка \"${wanted}\" не найдена. Найдено: ${found || 'ничего'}.`);\n}\n\nreturn [{json:{\n  report_folder_id: chosen.id,\n  report_folder_name: clean(chosen.name),\n  report_folder_url: chosen.webViewLink || '',\n  folder_name_normalized: clean(chosen.name) !== wanted\n}}];"
+      },
+      "id": "fb807789-655d-4acb-9475-1d612ffe1c92",
+      "name": "Pick AI Report Folder",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        158976,
+        -12976
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Folder lookup is only for the archive branch.\n// Collapse HTML + RAW input to one trigger item so Google Drive search runs once.\nreturn [{json:{archive_ready:true}}];"
+      },
+      "id": "a712fada-6d81-4392-8f58-87ca14f1f1ee",
+      "name": "Trigger Drive Archive Save",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        165568,
+        -12912
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const cfg = $('Config — AI Visibility').first().json;\nif (cfg.SAVE_RESULTS !== true) return [];\n\nconst rows = $('Collect AI Results').all().map(i => i.json || {});\nconst valid = rows.filter(r => !(r.data_error === true || String(r.data_error).toLowerCase() === 'true'));\n\nreturn valid.map(r => ({json:{\n  state_key: String(r.state_key || `${cfg.RUN_MODE}|${r.provider}|${r.slug}`),\n  checked_at: r.checked_at || '',\n  run_id: r.run_id || '',\n  provider: r.provider || '',\n  provider_label: r.provider_label || '',\n  model: r.model || '',\n  slug: r.slug || '',\n  category: r.category || '',\n  query: r.query || '',\n  owner_url: r.owner_url || '',\n  score_eligible: r.score_eligible || '',\n  brand_control: r.brand_control || '',\n  brand_mentioned: r.brand_mentioned === true || String(r.brand_mentioned).toLowerCase() === 'true',\n  site_cited: r.site_cited === true || String(r.site_cited).toLowerCase() === 'true',\n  models_mentioned: r.models_mentioned || '',\n  source_urls: r.source_urls || '',\n  answer_text: '',\n  data_error: false,\n  error: '',\n  state_hash: r.state_hash || ''\n}}));"
+      },
+      "id": "7499d0f7-bd40-4417-8faa-0962e08decb8",
+      "name": "Prepare State Rows",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        164464,
+        -12368
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const cfg = $('Config — AI Visibility').first().json;\nif (cfg.SAVE_RESULTS !== true) return [];\n\nconst rows = $('Collect AI Results').all().map(i => i.json || {});\nconst valid = rows.filter(r => !(r.data_error === true || String(r.data_error).toLowerCase() === 'true'));\n\nreturn valid.map(r => ({json:{\n  history_key: String(r.history_key || `${cfg.RUN_MODE}|${r.run_id}|${r.provider}|${r.slug}`),\n  checked_at: r.checked_at || '',\n  run_id: r.run_id || '',\n  provider: r.provider || '',\n  provider_label: r.provider_label || '',\n  model: r.model || '',\n  slug: r.slug || '',\n  category: r.category || '',\n  query: r.query || '',\n  owner_url: r.owner_url || '',\n  score_eligible: r.score_eligible || '',\n  brand_control: r.brand_control || '',\n  brand_mentioned: r.brand_mentioned === true || String(r.brand_mentioned).toLowerCase() === 'true',\n  site_cited: r.site_cited === true || String(r.site_cited).toLowerCase() === 'true',\n  models_mentioned: r.models_mentioned || '',\n  source_urls: r.source_urls || '',\n  answer_text: '',\n  data_error: false,\n  error: '',\n  state_hash: r.state_hash || ''\n}}));"
+      },
+      "id": "616361c9-caa6-4fc5-83da-66d166e628e0",
+      "name": "Prepare History Rows",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        164464,
+        -12208
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "appendOrUpdate",
+        "documentId": {
+          "__rl": true,
+          "value": "={{ $('Config — AI Visibility').first().json.SPREADSHEET_ID }}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "AI_Visibility_State",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {},
+          "matchingColumns": [
+            "state_key"
+          ],
+          "schema": [
+            {
+              "id": "state_key",
+              "displayName": "state_key",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "checked_at",
+              "displayName": "checked_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "run_id",
+              "displayName": "run_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "provider",
+              "displayName": "provider",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "provider_label",
+              "displayName": "provider_label",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "model",
+              "displayName": "model",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "slug",
+              "displayName": "slug",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "category",
+              "displayName": "category",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "query",
+              "displayName": "query",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "owner_url",
+              "displayName": "owner_url",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "score_eligible",
+              "displayName": "score_eligible",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "brand_control",
+              "displayName": "brand_control",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "brand_mentioned",
+              "displayName": "brand_mentioned",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "boolean",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "site_cited",
+              "displayName": "site_cited",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "boolean",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "models_mentioned",
+              "displayName": "models_mentioned",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "source_urls",
+              "displayName": "source_urls",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "answer_text",
+              "displayName": "answer_text",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "data_error",
+              "displayName": "data_error",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "boolean",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "error",
+              "displayName": "error",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "state_hash",
+              "displayName": "state_hash",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "3f30c0d4-7140-4917-bee6-8f35eada8f0c",
+      "name": "Save AI_Visibility_State",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        164736,
+        -12368
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "mtZFJ1tKr9CHmp0i",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "={{ $('Config — AI Visibility').first().json.SPREADSHEET_ID }}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "AI_Visibility_History",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "history_key",
+              "displayName": "history_key",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "checked_at",
+              "displayName": "checked_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "run_id",
+              "displayName": "run_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "provider",
+              "displayName": "provider",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "provider_label",
+              "displayName": "provider_label",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "model",
+              "displayName": "model",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "slug",
+              "displayName": "slug",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "category",
+              "displayName": "category",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "query",
+              "displayName": "query",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "owner_url",
+              "displayName": "owner_url",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "score_eligible",
+              "displayName": "score_eligible",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "brand_control",
+              "displayName": "brand_control",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "brand_mentioned",
+              "displayName": "brand_mentioned",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "boolean",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "site_cited",
+              "displayName": "site_cited",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "boolean",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "models_mentioned",
+              "displayName": "models_mentioned",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "source_urls",
+              "displayName": "source_urls",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "answer_text",
+              "displayName": "answer_text",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "data_error",
+              "displayName": "data_error",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "boolean",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "error",
+              "displayName": "error",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "state_hash",
+              "displayName": "state_hash",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "48b45e45-7ae7-4a52-b5f6-608576aed610",
+      "name": "Save AI_Visibility_History",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        164736,
+        -12208
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "mtZFJ1tKr9CHmp0i",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const rows = $('Build HTML + RAW Archive').all();\nconst item = rows.find(i => i.json?.kind === 'html');\nif (!item?.binary?.data) throw new Error('HTML archive binary not found');\nreturn [{json:item.json,binary:item.binary}];"
+      },
+      "id": "0be4829c-5d21-43ae-be97-4e8c89c39867",
+      "name": "Pick HTML for Drive",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        166224,
+        -12976
+      ]
+    },
+    {
+      "parameters": {
+        "name": "={{ $json.file_name }}",
+        "driveId": {
+          "__rl": true,
+          "mode": "list",
+          "value": "My Drive",
+          "cachedResultName": "My Drive",
+          "cachedResultUrl": "https://drive.google.com/drive/my-drive"
+        },
+        "folderId": {
+          "__rl": true,
+          "value": "={{ $('Pick AI Report Folder').first().json.report_folder_id }}",
+          "mode": "id",
+          "cachedResultName": "AI_Visibility_Reports"
+        },
+        "options": {
+          "simplifyOutput": true
+        }
+      },
+      "id": "9c1445a1-2054-4a43-88e3-7a5ff4695e8f",
+      "name": "Upload HTML Report to Drive",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        166496,
+        -12976
+      ],
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "4F0M35X1CjMvUOeU",
+          "name": "Google Drive account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "months",
+              "triggerAtDayOfMonth": 10,
+              "triggerAtHour": 10
+            }
+          ]
+        }
+      },
+      "id": "505ae542-754f-4ae1-86d9-2d0dd62d3c84",
+      "name": "Schedule — Monthly 10th",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.3,
+      "position": [
+        157792,
+        -12752
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{json:{run_mode:'FULL',run_source:'schedule-monthly-10th'}}];"
+      },
+      "id": "14fc5423-61c5-4ea0-a9f2-76e6c2fb6ac0",
+      "name": "Mode — FULL Monthly",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        158016,
+        -12752
+      ]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Manual Trigger — AI Visibility": {
+      "main": [
+        [
+          {
+            "node": "Mode — FULL Manual",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Config — AI Visibility": {
+      "main": [
+        [
+          {
+            "node": "Read Master_Briefs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Master_Briefs": {
+      "main": [
+        [
+          {
+            "node": "Read Daily_Monitor",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Daily_Monitor": {
+      "main": [
+        [
+          {
+            "node": "Build AI Visibility Queries",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read AI_Visibility_State": {
+      "main": [
+        [
+          {
+            "node": "Build AI Visibility Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build AI Visibility Queries": {
+      "main": [
+        [
+          {
+            "node": "Prepare Yandex Tasks",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Yandex Tasks": {
+      "main": [
+        [
+          {
+            "node": "Yandex GenSearch",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Yandex GenSearch": {
+      "main": [
+        [
+          {
+            "node": "Normalize Yandex",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize Yandex": {
+      "main": [
+        [
+          {
+            "node": "Prepare GPT Tasks",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare GPT Tasks": {
+      "main": [
+        [
+          {
+            "node": "GPT Web Answer",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "GPT Web Answer": {
+      "main": [
+        [
+          {
+            "node": "Normalize GPT",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize GPT": {
+      "main": [
+        [
+          {
+            "node": "Prepare Gemini Tasks",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Gemini Tasks": {
+      "main": [
+        [
+          {
+            "node": "Gemini Web Answer",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gemini Web Answer": {
+      "main": [
+        [
+          {
+            "node": "Normalize Gemini",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize Gemini": {
+      "main": [
+        [
+          {
+            "node": "Prepare Qwen Tasks",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Qwen Tasks": {
+      "main": [
+        [
+          {
+            "node": "Qwen Web Answer",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Qwen Web Answer": {
+      "main": [
+        [
+          {
+            "node": "Normalize Qwen",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize Qwen": {
+      "main": [
+        [
+          {
+            "node": "Collect AI Results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Collect AI Results": {
+      "main": [
+        [
+          {
+            "node": "Gate — Read Previous State Once",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build AI Visibility Report": {
+      "main": [
+        [
+          {
+            "node": "Send AI Visibility Summary",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Prepare State Rows",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Prepare History Rows",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send AI Visibility Summary": {
+      "main": [
+        [
+          {
+            "node": "Render AI Matrix",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Render AI Matrix": {
+      "main": [
+        [
+          {
+            "node": "Send AI Matrix",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send AI Matrix": {
+      "main": [
+        [
+          {
+            "node": "Render AI Visibility Bars",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Render AI Visibility Bars": {
+      "main": [
+        [
+          {
+            "node": "Send AI Visibility Bars",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gate — Read Previous State Once": {
+      "main": [
+        [
+          {
+            "node": "Read AI_Visibility_State",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mode — FULL Manual": {
+      "main": [
+        [
+          {
+            "node": "Config — AI Visibility",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build HTML + RAW Archive": {
+      "main": [
+        [
+          {
+            "node": "Pick HTML for Telegram FIRST",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Trigger Drive Archive Save",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pick HTML for Telegram FIRST": {
+      "main": [
+        [
+          {
+            "node": "Send AI Visibility HTML",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send AI Visibility Bars": {
+      "main": [
+        [
+          {
+            "node": "Render AI Source Domains",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Render AI Source Domains": {
+      "main": [
+        [
+          {
+            "node": "Send AI Source Domains",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send AI Source Domains": {
+      "main": [
+        [
+          {
+            "node": "Build HTML + RAW Archive",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Trigger Drive Archive Save": {
+      "main": [
+        [
+          {
+            "node": "Find AI_Visibility_Reports Folder",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Find AI_Visibility_Reports Folder": {
+      "main": [
+        [
+          {
+            "node": "Pick AI Report Folder",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pick AI Report Folder": {
+      "main": [
+        [
+          {
+            "node": "Pick HTML for Drive",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare State Rows": {
+      "main": [
+        [
+          {
+            "node": "Save AI_Visibility_State",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare History Rows": {
+      "main": [
+        [
+          {
+            "node": "Save AI_Visibility_History",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pick HTML for Drive": {
+      "main": [
+        [
+          {
+            "node": "Upload HTML Report to Drive",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Schedule — Monthly 10th": {
+      "main": [
+        [
+          {
+            "node": "Mode — FULL Monthly",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mode — FULL Monthly": {
+      "main": [
+        [
+          {
+            "node": "Config — AI Visibility",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "nodeGroups": [],
+  "tags": []
+}
