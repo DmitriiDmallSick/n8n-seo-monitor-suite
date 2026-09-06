@@ -108,7 +108,7 @@ Up to 10 issue lines are inlined directly in the message; beyond that it adds
 per day, green bars for clean days and red for days with failures. Sent to
 Telegram as a photo with the summary above as its caption.
 
-![Weekly runtime chart — bar chart of daily error counts over the last 7 days, green for clean days and red for days with failures](./assets/weekly-runtime-chart.png)
+![Weekly runtime chart — bar chart of daily error counts over the last 7 days, green for clean days and red for days with failures](./assets/daily-weeklyassetsweekly-runtime-chart.png)
 
 **Attached file** (`Weekly_SEO_Report_<date>.md`) — four sections: Yandex
 Webmaster snapshot, 7-day uptime, deviations (one block per page with issues),
