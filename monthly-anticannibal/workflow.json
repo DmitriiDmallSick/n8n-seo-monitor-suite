@@ -322,7 +322,7 @@
     },
     {
       "parameters": {
-        "chatId": "-1003946518485",
+        "chatId": "YOUR_TELEGRAM_CHAT_ID",
         "text": "={{ $('Enrich Monthly with Cannibalization').first().json.telegram_summary }}",
         "additionalFields": {
           "appendAttribution": false,
@@ -350,7 +350,7 @@
     {
       "parameters": {
         "operation": "sendDocument",
-        "chatId": "-1003946518485",
+        "chatId": "YOUR_TELEGRAM_CHAT_ID",
         "binaryData": true,
         "additionalFields": {
           "caption": "📄 Детальный отчёт по SEO-категориям"
@@ -409,7 +409,7 @@
     },
     {
       "parameters": {
-        "chatId": "-1003946518485",
+        "chatId": "YOUR_TELEGRAM_CHAT_ID",
         "text": "={{ $('2. Report Builder').first().json.ai_executive_report }}",
         "additionalFields": {
           "appendAttribution": false,
@@ -3216,7 +3216,7 @@
     {
       "parameters": {
         "operation": "sendDocument",
-        "chatId": "-1003946518485",
+        "chatId": "YOUR_TELEGRAM_CHAT_ID",
         "binaryData": true,
         "additionalFields": {
           "caption": "📄 SEO Каннибализация категорий v2.17 — полный отчёт: запросы, SERP, LOW_DATA и доказательства (.md)"
@@ -3274,7 +3274,7 @@
     },
     {
       "parameters": {
-        "chatId": "-1003946518485",
+        "chatId": "YOUR_TELEGRAM_CHAT_ID",
         "text": "={{ $('Cannibalization Report Builder').first().json.telegram_report }}\n\n🔗 <b>Полный отчет:</b> <a href=\"{{ $json.webViewLink || 'https://drive.google.com/drive/folders/YOUR_GOOGLE_DRIVE_FOLDER_ID' }}\">Открыть на Google Диске</a>",
         "additionalFields": {
           "appendAttribution": false,
@@ -4485,7 +4485,7 @@
     {
       "parameters": {
         "operation": "sendPhoto",
-        "chatId": "-1003946518485",
+        "chatId": "YOUR_TELEGRAM_CHAT_ID",
         "binaryData": true,
         "additionalFields": {
           "caption": "🧩 Реальные scored-конфликты · только то, что уже набрало WATCH/HIGH/CRITICAL",
@@ -4546,7 +4546,7 @@
     {
       "parameters": {
         "operation": "sendPhoto",
-        "chatId": "-1003946518485",
+        "chatId": "YOUR_TELEGRAM_CHAT_ID",
         "binaryData": true,
         "additionalFields": {
           "caption": "🔎 Контроль основных запросов · SERP-сигналы отдельно от Risk score",
@@ -4779,7 +4779,7 @@
     {
       "parameters": {
         "operation": "sendPhoto",
-        "chatId": "-1003946518485",
+        "chatId": "YOUR_TELEGRAM_CHAT_ID",
         "binaryData": true,
         "binaryPropertyName": "recoveryImage",
         "additionalFields": {
@@ -4879,7 +4879,7 @@
     {
       "parameters": {
         "operation": "sendPhoto",
-        "chatId": "-1003946518485",
+        "chatId": "YOUR_TELEGRAM_CHAT_ID",
         "binaryData": true,
         "binaryPropertyName": "categoryImage",
         "additionalFields": {
@@ -5241,7 +5241,7 @@
     },
     {
       "parameters": {
-        "chatId": "-1003946518485",
+        "chatId": "YOUR_TELEGRAM_CHAT_ID",
         "text": "⚠️ График поисковой динамики не сформирован после 3 попыток. Monthly-расчёты продолжены; проверьте Download Monthly Recovery Dynamics / QuickChart.",
         "additionalFields": {
           "parse_mode": "HTML"
@@ -6257,7 +6257,7 @@
     {
       "parameters": {
         "operation": "sendPhoto",
-        "chatId": "-1003946518485",
+        "chatId": "YOUR_TELEGRAM_CHAT_ID",
         "binaryData": true,
         "binaryPropertyName": "serpDynamicsImage",
         "additionalFields": {
