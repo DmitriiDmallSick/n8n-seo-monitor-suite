@@ -260,7 +260,7 @@
     {
       "parameters": {
         "operation": "sendPhoto",
-        "chatId": "-1003946518485",
+        "chatId": "YOUR_TELEGRAM_CHAT_ID",
         "binaryData": true,
         "additionalFields": {
           "caption": "={{ $('Process & Aggregate Weekly').first().json.telegram_summary }}",
@@ -299,7 +299,7 @@
     {
       "parameters": {
         "operation": "sendDocument",
-        "chatId": "-1003946518485",
+        "chatId": "YOUR_TELEGRAM_CHAT_ID",
         "binaryData": true,
         "binaryPropertyName": "markdown_file",
         "additionalFields": {
@@ -464,7 +464,7 @@
     {
       "parameters": {
         "operation": "sendDocument",
-        "chatId": "-1003946518485",
+        "chatId": "YOUR_TELEGRAM_CHAT_ID",
         "binaryData": true,
         "additionalFields": {
           "caption": "={{ $json.telegram_text }}",
